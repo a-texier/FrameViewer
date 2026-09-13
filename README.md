@@ -7,6 +7,33 @@ conversion tools and a documented Python plugin API.
 
 ![FrameViewer](logo_frameviewer.png)
 
+![FrameViewer tutorial demo](IMG_GITHUB/FrameViewer_demo.gif)
++
+## What FrameViewer does
+
+**FrameViewer is a visualization and rapid-review application.** Its primary
+role is to display media and precomputed results clearly, compare them quickly
+and export what the operator sees. Model training and inference orchestration
+remain outside its core scope.
+
+The application is designed around **multimodal inspection**: RGB, infrared,
+thermal, grayscale, 8/16-bit imagery, videos, annotations and plugin-generated
+results can be reviewed independently or combined in synchronized views.
+
+| Area | Capabilities |
+| --- | --- |
+| **Media and navigation** | Open individual images, naturally ordered image folders, videos and raw YUV streams from the toolbar, command line or drag and drop. Scrub the timeline, enter a frame number, step frame by frame, play, loop, control audio and monitor the effective frame rate. |
+| **Multimodal multi-view** | Display one to four heterogeneous sources in single, side-by-side, stacked, three-column or 2x2 layouts. Use temporal comparison or alpha fusion, keep views independent, or link frame navigation, zoom and pan with per-view starting offsets and safe common playback limits. |
+| **Display pipeline** | Apply per-view black/white windowing, automatic, min/max, full-range or fixed contrast, built-in color maps, custom 3D LUTs, CLAHE, sharpening, edge detection, inversion and 90-degree rotation. Select a reduced display resolution for heavy or remote datasets without changing the source data. |
+| **Inspection and measurement** | Zoom, pan and auto-fit precisely. Draw a ROI and inspect its crop, histogram, minimum, maximum, mean, standard deviation and median. Compute a 2D FFT, export a line profile, measure distance and angle, compare frames temporally and use a configurable crosshair. |
+| **Results and annotations** | Load YOLO folders, merged YOLO text files and tracked-box files. Match labels by image name, manage classes and tracks, inspect annotation counts, show or hide individual layers, follow a tracked box with a ROI and convert between supported annotation layouts. |
+| **Capture and export** | Capture the displayed frame, record image clicks to text, undo or clear clicks, define IN/OUT ranges, assemble multiple extraction segments and export clips or image sequences. Export raw 16-bit data when available or bake contrast, LUTs, filters, annotations and plugin overlays exactly as displayed. |
+| **Multiview export** | Export the complete synchronized composition, including layouts, multimodal sources, temporal offsets and inter-view overlays, to a shareable video or image result. |
+| **Plugin platform** | Discover code or graph plugins from application and user directories. Assign data by drag and drop, render shapes, patches and inter-view links, expose dock panels and actions, inspect isolated logs, reload plugins, and create or edit plugins from the built-in tools. |
+| **Professional workflow** | Background loading and prefetching keep the interface responsive. User settings, layouts, rendering choices and plugin configuration are isolated in a writable profile. The application works locally and offline and can be rebuilt as standalone Windows, Linux x64 and Linux ARM64 packages. |
+| **Guided onboarding** | A 40-step interactive tutorial uses bundled RGB, thermal, YOLO and multiview examples to exercise the real controls, including drag and drop, LUTs, exports, linked views and both demonstration plugins. |
+
+
 ## Run from source
 
 Requirements: Windows or Linux, Python 3.12 and a working C/C++ runtime for
