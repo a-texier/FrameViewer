@@ -1,0 +1,16 @@
+{
+ "name": "Demo showcase - tous les hooks",
+ "kind": "code",
+ "frame_input": "Current Frame",
+ "inputs": [
+  {
+   "name": "boxes"
+  }
+ ],
+ "element_keys": {
+  "bbox": "m",
+  "label": "m",
+  "grid": "m",
+  "sidecar_mark": "m"
+ }
+}

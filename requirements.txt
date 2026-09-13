@@ -1,0 +1,8 @@
+opencv-python>=4.8
+numpy>=1.24
+pandas>=2.0
+polars>=1.0
+PySide6==6.8.3
+shiboken6==6.8.3
+pyinstaller>=6.0
+typing_extensions>=4.12

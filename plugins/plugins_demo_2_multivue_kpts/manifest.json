@@ -1,0 +1,9 @@
+{
+ "name": "Demo 2 vues - keypoints inter-vues",
+ "kind": "code",
+ "inputs": [
+  {
+   "name": "pairs_csv"
+  }
+ ]
+}
