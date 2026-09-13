@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt
 
 from frameviewer.core.feature_registry import operation_for_kind
 from frameviewer.core.sources import describe_source
+from frameviewer.ui.i18n import set_ui_text, ui_text
 
 SpecializedWriter = operation_for_kind("sequence_format", "writer")
 type_img_for_dtype = operation_for_kind("sequence_format", "type_for_dtype")
@@ -114,12 +115,12 @@ class ConvertDialog(QtWidgets.QDialog):
         if self.mode in ("mp4", "specialized"):
             filt = "Video MP4 (*.mp4)" if self.mode == "mp4" else "Sequence SPECIALIZED (*.specialized)"
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Fichier de sortie", self.dir_edit.text(), filt)
+                self, ui_text(self, "Fichier de sortie"), self.dir_edit.text(), filt)
             if path:
                 self.dir_edit.setText(path)
         else:
             d = QtWidgets.QFileDialog.getExistingDirectory(
-                self, "Dossier de sortie", self.dir_edit.text())
+                self, ui_text(self, "Dossier de sortie"), self.dir_edit.text())
             if d:
                 self.dir_edit.setText(d)
 
@@ -246,7 +247,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
             "• le contraste/LUT/filtres courants\n"
             "• les boîtes .ver visibles\n"
             "• le calque SIDECAR (si coché)\n"
-            "S'applique aux formats Dossier PNG, Fichier SPECIALIZED et MP4 re-encodé.")
+            "S'applique aux formats d'images rendues et aux vidéos ré-encodées.")
         self._as_viewed_chk.setChecked(False)
         self._fmt.currentIndexChanged.connect(self._upd_as_viewed_visible)
         self._upd_as_viewed_visible()
@@ -334,14 +335,14 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         if fmt in ("mp4_ff", "mp4_cv2"):
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Enregistrer le clip...",
+                self, ui_text(self, "Enregistrer le clip..."),
                 f"clip_{start:05d}-{end:05d}.mp4", "Vidéo MP4 (*.mp4)")
             if not path:
                 return
             if fmt == "mp4_ff":
                 ok = self._ffmpeg(path, start, end)
                 if not ok:
-                    self._status.setText("ffmpeg échoué — basculement cv2.")
+                    set_ui_text(self._status, "ffmpeg échoué — basculement cv2.")
                     self._cv2_mp4(path, start, end, as_viewed)
             else:
                 self._cv2_mp4(path, start, end, as_viewed)
@@ -350,7 +351,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         elif fmt == "copy":
             folder = QtWidgets.QFileDialog.getExistingDirectory(
-                self, "Dossier de destination...")
+                self, ui_text(self, "Dossier de destination..."))
             if not folder:
                 return
             self._file_copy(folder, start, end)
@@ -359,7 +360,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         elif fmt == "png_folder":
             folder = QtWidgets.QFileDialog.getExistingDirectory(
-                self, "Dossier de destination pour les PNG...")
+                self, ui_text(self, "Dossier de destination pour les PNG..."))
             if not folder:
                 return
             self._rendered_folder(folder, start, end, ".png", as_viewed)
@@ -368,7 +369,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         elif fmt == "tiff_raw":
             folder = QtWidgets.QFileDialog.getExistingDirectory(
-                self, "Dossier de destination pour les TIFF...")
+                self, ui_text(self, "Dossier de destination pour les TIFF..."))
             if not folder:
                 return
             self._raw_folder(folder, start, end, ".tiff")
@@ -377,7 +378,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         elif fmt == "png16_raw":
             folder = QtWidgets.QFileDialog.getExistingDirectory(
-                self, "Dossier de destination pour les PNG 16 bits...")
+                self, ui_text(self, "Dossier de destination pour les PNG 16 bits..."))
             if not folder:
                 return
             self._raw_folder(folder, start, end, ".png", png16=True)
@@ -386,7 +387,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         elif fmt == "specialized":
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Enregistrer le clip SPECIALIZED...",
+                self, ui_text(self, "Enregistrer le clip SPECIALIZED..."),
                 f"clip_{start:05d}-{end:05d}.specialized", "SPECIALIZED (*.specialized)")
             if not path:
                 return
@@ -448,9 +449,9 @@ class ClipExtractDialog(QtWidgets.QDialog):
             with open(out_file, "w", encoding="utf-8") as fh:
                 fh.write("\n".join(lines))
             cur = self._status.text()
-            self._status.setText(cur + f"\nAnnotations ({len(lines)} det.) → {out_file}")
+            set_ui_text(self._status, cur + f"\nAnnotations ({len(lines)} det.) → {out_file}")
         except Exception as ex:
-            self._status.setText(self._status.text() + f"\nErreur annot : {ex}")
+            set_ui_text(self._status, self._status.text() + f"\nErreur annot : {ex}")
 
     def _export_sidecars(self, dest, start, end, is_folder):
         """Exporte, à côté du clip et ré-indexés sur IN→OUT : les calques SIDECAR,
@@ -493,7 +494,8 @@ class ClipExtractDialog(QtWidgets.QDialog):
                         self._slice_one_plugin_file(
                             path, dest, start, end, is_folder, lp.plugin_id, var)
                     except Exception as ex:
-                        self._status.setText(
+                        set_ui_text(
+                            self._status,
                             self._status.text() + f"\nErreur données plugin ({var}) : {ex}")
 
     def _slice_one_plugin_file(self, path, dest, start, end, is_folder, pid, var):
@@ -506,8 +508,8 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         if ext not in (".csv", ".tsv", ".txt", ".dat"):
             shutil.copy2(path, out_file)   # binaire/inconnu : copie verbatim
-            self._status.setText(self._status.text()
-                                 + f"\nDonnées plugin copiées (non tabulaire) → {out_file}")
+            set_ui_text(self._status, self._status.text()
+                        + f"\nDonnées plugin copiées (non tabulaire) → {out_file}")
             return
 
         with open(path, "r", encoding="utf-8", errors="replace", newline="") as fh:
@@ -522,7 +524,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
         fcol = next((i for i, c in enumerate(cols) if c in self._FRAME_COLS), -1)
         if fcol < 0:
             shutil.copy2(path, out_file)
-            self._status.setText(
+            set_ui_text(self._status,
                 self._status.text()
                 + f"\nDonnées plugin ({var}) copiées SANS ré-indexation "
                   "(aucune colonne de frame reconnue) → " + out_file)
@@ -569,7 +571,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
 
         with open(out_file, "w", encoding="utf-8", newline="") as fh:
             fh.write("\n".join(out_lines))
-        self._status.setText(
+        set_ui_text(self._status,
             self._status.text()
             + f"\nDonnées plugin ({var}) : {kept} ligne(s) ré-indexée(s) "
               f"(base {onebase}) → {out_file}")
@@ -597,11 +599,11 @@ class ClipExtractDialog(QtWidgets.QDialog):
             write_overlay_sidecar(sub, out_file)
             cur = self._status.text()
             n = sum(len(v) for v in sub.values())
-            self._status.setText(
+            set_ui_text(self._status,
                 (cur + "\n" if cur else "") +
                 f"Calques SIDECAR ({len(sub)} frames, {n} formes) → {out_file}")
         except Exception as ex:
-            self._status.setText(self._status.text() + f"\nErreur SIDECAR : {ex}")
+            set_ui_text(self._status, self._status.text() + f"\nErreur SIDECAR : {ex}")
 
     def _ffmpeg(self, out_path, start, end):
         ff = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
@@ -631,7 +633,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
                  *codec_args, out_path],
                 capture_output=True, timeout=300)
             if r.returncode == 0:
-                self._status.setText(f"Extrait {label} → {out_path}")
+                set_ui_text(self._status, f"Extrait {label} → {out_path}")
                 return True
         except Exception:
             pass
@@ -647,7 +649,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
             # séquence) — cap.read() ci-dessous ne sait pas graver de calques.
             out0 = self._apply_crop(mw._export_frame_as_viewed(start))
             if out0 is None:
-                self._status.setText("Impossible de traiter la frame source.")
+                set_ui_text(self._status, "Impossible de traiter la frame source.")
                 return
             h, w = out0.shape[:2]
             writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
@@ -666,12 +668,12 @@ class ClipExtractDialog(QtWidgets.QDialog):
                 QtWidgets.QApplication.processEvents()
             writer.release()
             self._set_ui(False)
-            self._status.setText(f"Extrait (tel qu'affiché, calques inclus) → {out_path}")
+            set_ui_text(self._status, f"Extrait (tel qu'affiché, calques inclus) → {out_path}")
             return
         if hasattr(src, 'cap') and self._crop is None:
             cap = cv2.VideoCapture(src.path)
             if not cap.isOpened():
-                self._status.setText("Impossible d'ouvrir la source vidéo.")
+                set_ui_text(self._status, "Impossible d'ouvrir la source vidéo.")
                 return
             cap.set(cv2.CAP_PROP_POS_FRAMES, start)
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -693,7 +695,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
         else:
             out0 = self._apply_crop(mw.process(mw._apply_rotation(src.get(start))))
             if out0 is None:
-                self._status.setText("Impossible de traiter la frame source.")
+                set_ui_text(self._status, "Impossible de traiter la frame source.")
                 return
             h, w = out0.shape[:2]
             writer = cv2.VideoWriter(
@@ -715,7 +717,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
                 QtWidgets.QApplication.processEvents()
             writer.release()
         self._set_ui(False)
-        self._status.setText(f"Extrait (re-encodé) → {out_path}")
+        set_ui_text(self._status, f"Extrait (re-encodé) → {out_path}")
 
     def _link_or_copy(self, src, dst):
         """Tente symlink, puis lien physique, puis copie. -> 'sym'|'hard'|'copy'."""
@@ -758,12 +760,12 @@ class ClipExtractDialog(QtWidgets.QDialog):
             QtWidgets.QApplication.processEvents()
         self._set_ui(False)
         if use_link:
-            self._status.setText(
+            set_ui_text(self._status,
                 f"Liens créés → {folder}  "
                 f"(symlink {tally['sym']}, lien physique {tally['hard']}, "
                 f"copie {tally['copy']})")
         else:
-            self._status.setText(f"Fichiers copiés → {folder}")
+            set_ui_text(self._status, f"Fichiers copiés → {folder}")
 
     def _rendered_folder(self, folder, start, end, ext, as_viewed=False):
         mw = self._mw
@@ -782,7 +784,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
             self._prog.setValue(i + 1)
             QtWidgets.QApplication.processEvents()
         self._set_ui(False)
-        self._status.setText(f"PNG exportés → {folder}")
+        set_ui_text(self._status, f"PNG exportés → {folder}")
 
     def _raw_folder(self, folder, start, end, ext, png16=False):
         mw = self._mw
@@ -806,7 +808,8 @@ class ClipExtractDialog(QtWidgets.QDialog):
             self._prog.setValue(i + 1)
             QtWidgets.QApplication.processEvents()
         self._set_ui(False)
-        self._status.setText(
+        set_ui_text(
+            self._status,
             f"{'PNG 16 bits' if png16 else 'TIFF'} exportés → {folder}")
 
     def _specialized_export(self, out_path, start, end, as_viewed=False):
@@ -814,7 +817,7 @@ class ClipExtractDialog(QtWidgets.QDialog):
         défaut, ou rendu « tel qu'affiché » (8 bits, calques gravés) si
         as_viewed est coché."""
         if SpecializedWriter is None:
-            self._status.setText("SpecializedWriter indisponible (specialized_reader manquant).")
+            set_ui_text(self._status, "SpecializedWriter indisponible (specialized_reader manquant).")
             return
         mw = self._mw
         n = end - start + 1
@@ -841,13 +844,13 @@ class ClipExtractDialog(QtWidgets.QDialog):
                 self._prog.setValue(i + 1)
                 QtWidgets.QApplication.processEvents()
         except Exception as ex:
-            self._status.setText(f"Erreur SPECIALIZED : {ex}")
+            set_ui_text(self._status, f"Erreur SPECIALIZED : {ex}")
             return
         finally:
             if writer:
                 writer.close()
             self._set_ui(False)
-        self._status.setText(f"SPECIALIZED écrit ({written} frames) → {out_path}")
+        set_ui_text(self._status, f"SPECIALIZED écrit ({written} frames) → {out_path}")
 
 
 class SplitExtractDialog(QtWidgets.QDialog):
@@ -976,12 +979,12 @@ class SplitExtractDialog(QtWidgets.QDialog):
 
     def _extract_all(self):
         if not self._segments:
-            self._status.setText("Aucun morceau valide à extraire.")
+            set_ui_text(self._status, "Aucun morceau valide à extraire.")
             return
         fmt = self._fmt.currentData()
         base = self._sanitize(self._name_edit.text())
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Dossier de destination des morceaux...")
+            self, ui_text(self, "Dossier de destination des morceaux..."))
         if not folder:
             return
         as_viewed = self._as_viewed_chk.isChecked()
@@ -1035,10 +1038,10 @@ class SplitExtractDialog(QtWidgets.QDialog):
                 done += 1
             except Exception as ex:
                 errors += 1
-                self._status.setText(f"Erreur sur {tag} : {ex}")
+                set_ui_text(self._status, f"Erreur sur {tag} : {ex}")
             finally:
                 d.deleteLater()
-            self._status.setText(
+            set_ui_text(self._status,
                 f"{done}/{len(self._segments)} morceau(x) exporté(s) → {folder}"
                 + (f"  ({errors} erreur(s))" if errors else ""))
             QtWidgets.QApplication.processEvents()
@@ -1187,21 +1190,21 @@ class RoiConvertDialog(QtWidgets.QDialog):
         base = None
         if fmt == "mp4":
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Exporter le crop ROI...", "roi_crop.mp4", "Vidéo MP4 (*.mp4)")
+                self, ui_text(self, "Exporter le crop ROI..."), "roi_crop.mp4", "Vidéo MP4 (*.mp4)")
             if not path:
                 return
             self._export_mp4(path, n)
             base = os.path.splitext(path)[0]
         elif fmt == "png_folder":
             folder = QtWidgets.QFileDialog.getExistingDirectory(
-                self, "Dossier de destination pour les PNG...")
+                self, ui_text(self, "Dossier de destination pour les PNG..."))
             if not folder:
                 return
             self._export_png_folder(folder, n)
             base = os.path.join(folder, "roi")
         else:
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Exporter le crop ROI (SPECIALIZED)...", "roi_crop.specialized", "SPECIALIZED (*.specialized)")
+                self, ui_text(self, "Exporter le crop ROI (SPECIALIZED)..."), "roi_crop.specialized", "SPECIALIZED (*.specialized)")
             if not path:
                 return
             self._export_specialized(path, n)
@@ -1231,7 +1234,7 @@ class RoiConvertDialog(QtWidgets.QDialog):
         if writer is not None:
             writer.release()
         self._set_ui(False, n)
-        self._status.setText(f"Crop ROI exporté ({written} frames) → {path}")
+        set_ui_text(self._status, f"Crop ROI exporté ({written} frames) → {path}")
 
     def _export_png_folder(self, folder, n):
         self._set_ui(True, n)
@@ -1244,11 +1247,11 @@ class RoiConvertDialog(QtWidgets.QDialog):
             self._prog.setValue(idx + 1)
             QtWidgets.QApplication.processEvents()
         self._set_ui(False, n)
-        self._status.setText(f"PNG exportés ({written} frames) → {folder}")
+        set_ui_text(self._status, f"PNG exportés ({written} frames) → {folder}")
 
     def _export_specialized(self, path, n):
         if SpecializedWriter is None:
-            self._status.setText("SpecializedWriter indisponible (specialized_reader manquant).")
+            set_ui_text(self._status, "SpecializedWriter indisponible (specialized_reader manquant).")
             return
         self._set_ui(True, n)
         writer = None
@@ -1273,13 +1276,13 @@ class RoiConvertDialog(QtWidgets.QDialog):
                 self._prog.setValue(idx + 1)
                 QtWidgets.QApplication.processEvents()
         except Exception as ex:
-            self._status.setText(f"Erreur SPECIALIZED : {ex}")
+            set_ui_text(self._status, f"Erreur SPECIALIZED : {ex}")
             return
         finally:
             if writer:
                 writer.close()
             self._set_ui(False, n)
-        self._status.setText(f"SPECIALIZED (ROI) écrit ({written} frames) → {path}")
+        set_ui_text(self._status, f"SPECIALIZED (ROI) écrit ({written} frames) → {path}")
 
     def _export_heatmap(self, path, n):
         rows = []
@@ -1346,7 +1349,7 @@ class RoiConvertDialog(QtWidgets.QDialog):
 
         cv2.imwrite(path, canvas)
         cur = self._status.text()
-        self._status.setText((cur + "\n" if cur else "") + f"Heatmap histogrammes → {path}")
+        set_ui_text(self._status, (cur + "\n" if cur else "") + f"Heatmap histogrammes → {path}")
 
 
 # ----------------------------- fenetre principale -------------------------

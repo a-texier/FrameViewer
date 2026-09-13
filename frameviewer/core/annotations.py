@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Dessin des boites d'annotation .ver (suivi) sur une frame BGR."""
+"""Draw tracked and YOLO annotation boxes on a BGR frame."""
 import cv2
 import numpy as np
 
-# --------------------------- annotations .ver ------------------------------
+# ------------------------------- annotations -------------------------------
 
 def _rotate_box_coords(x1, y1, x2, y2, orig_w, orig_h, degrees):
-    """Transforme des coordonnées de boîte pour une rotation de l'image."""
+    """Transform box coordinates for an image rotation."""
     steps = (degrees // 90) % 4
     W, H = orig_w, orig_h
     for _ in range(steps):
@@ -16,7 +16,7 @@ def _rotate_box_coords(x1, y1, x2, y2, orig_w, orig_h, degrees):
 
 
 def _ann_color(idx):
-    """Couleur BGR unique par track_id (répartition golden-ratio)."""
+    """Return a stable BGR color per track identifier using golden-ratio spacing."""
     h = (idx * 0.618033988749895) % 1.0
     i = int(h * 6); f = h * 6 - i
     v, s = 0.95, 0.85
@@ -27,8 +27,11 @@ def _ann_color(idx):
 
 
 def draw_annotation_boxes(img, annots, orig_w, orig_h, rotation=0, scale=1.0):
-    """Dessine les boîtes .ver/YOLO sur img (copie). `annots` = liste de
-    (cls, x1, y1, x2, y2, track_id, labels). Réutilisable par toutes les vues."""
+    """Draw annotations on a copy of ``img``.
+
+    ``annots`` contains ``(cls, x1, y1, x2, y2, track_id, labels)`` rows and
+    can be reused by every view.
+    """
     if img is None or not annots:
         return img
     h_img, w_img = img.shape[:2]
@@ -57,16 +60,17 @@ def draw_annotation_boxes(img, annots, orig_w, orig_h, rotation=0, scale=1.0):
 
 
 def bake_sidecar_overlays(bgr, graphs):
-    """Version cv2 (pixels figes) de VideoWidget._draw_overlays, pour graver
-    les graphiques SIDECAR dans une image exportee. Deplace depuis
-    MainWindow._bake_sidecar_overlays (etait un @staticmethod pur, sans etat) pour
-    eviter un import circulaire ui.multiview <-> ui.main_window."""
+    """Bake vector overlays into an exported image with OpenCV.
+
+    This is the pixel-based counterpart of ``VideoWidget._draw_overlays`` and
+    lives in the backend to avoid a circular UI import.
+    """
     out = bgr.copy()
     if out.ndim == 2:
         out = cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
     for g in graphs:
         rgb = g.get("color", (40, 220, 60))
-        col = (int(rgb[2]), int(rgb[1]), int(rgb[0]))   # RGB (QColor) -> BGR (cv2)
+        col = (int(rgb[2]), int(rgb[1]), int(rgb[0]))   # QColor RGB to OpenCV BGR
         thick = max(1, int(g.get("thickness", 1)))
         pts = [(int(round(x)), int(round(y))) for (x, y) in g.get("points", [])]
         t = g.get("type", "")

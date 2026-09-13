@@ -15,6 +15,7 @@ from PySide6 import QtWidgets
 from frameviewer.plugins.api import FrameViewerPlugin, PluginAPI
 from frameviewer.plugins.loader import (PLUGIN_FOLDER_PREFIX, PLUGIN_MODULE_FILE,
                                          plugins_root, plugins_roots)
+from frameviewer.ui.i18n import set_ui_text, ui_text
 
 _NEW_PLUGIN_TEMPLATE = '''# -*- coding: utf-8 -*-
 """Plugin FrameViewer -- decris ici, en une phrase, ce que fait ce plugin
@@ -157,6 +158,8 @@ def _api_call_snippet(method):
 
 
 class PluginEditorDialog(QtWidgets.QDialog):
+    def _tr(self, text):
+        return ui_text(self, text)
 
     def __init__(self, mw):
         super().__init__(mw)
@@ -293,7 +296,7 @@ class PluginEditorDialog(QtWidgets.QDialog):
         path = self._current_path()
         if path is None or not os.path.isfile(path):
             self._editor.setPlainText("")
-            self._file_lbl.setText("(aucun plugin sélectionné)")
+            set_ui_text(self._file_lbl, "(aucun plugin sélectionné)")
             return
         with open(path, "r", encoding="utf-8") as f:
             self._editor.setPlainText(f.read())
@@ -307,18 +310,18 @@ class PluginEditorDialog(QtWidgets.QDialog):
     def _save(self):
         path = self._current_path()
         if path is None:
-            self._status.setText("Aucun plugin sélectionné.")
+            set_ui_text(self._status, "Aucun plugin sélectionné.")
             return
         with open(path, "w", encoding="utf-8") as f:
             f.write(self._editor.toPlainText())
-        self._status.setText("Enregistré.")
+        set_ui_text(self._status, "Enregistré.")
 
     def _save_and_reload(self):
         self._save()
         self._mw._plugin_loader.reload_all()
         if self._mw._raw is not None:
             self._mw._display()
-        self._status.setText("Enregistré + plugins rechargés.")
+        set_ui_text(self._status, "Enregistré + plugins rechargés.")
 
     def _new_plugin(self):
         name, ok = QtWidgets.QInputDialog.getText(
@@ -339,7 +342,8 @@ class PluginEditorDialog(QtWidgets.QDialog):
         create_code_plugin_folder(slug)
         self._refresh_plugin_list()
         self.select_entry(f"{PLUGIN_FOLDER_PREFIX}{slug}")
-        self._status.setText(f"Créé -- {PLUGIN_FOLDER_PREFIX}{slug}/plugin.py")
+        set_ui_text(
+            self._status, f"Créé -- {PLUGIN_FOLDER_PREFIX}{slug}/plugin.py")
 
     def select_entry(self, entry_name):
         """Selectionne le plugin `entry_name` (nom de dossier) dans la liste,

@@ -101,6 +101,11 @@ def build(one_dir: bool) -> None:
     for name in PLUGINS:
         shutil.copytree(ROOT / "plugins" / name, plugin_target / name)
     shutil.copytree(ROOT / "data_test", target / "data_test")
+    for name in (
+        "LICENSE", "COMMERCIAL_LICENSE.md", "CONTRIBUTING.md",
+        "THIRD_PARTY_LICENSES.md",
+    ):
+        shutil.copy2(ROOT / name, target / name)
     print(f"Standalone build created in: {target}")
 
 

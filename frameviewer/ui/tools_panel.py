@@ -8,6 +8,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from frameviewer.ui.roi_panel import RoiPanel
+from frameviewer.ui.i18n import set_ui_pair, set_ui_text, ui_text
 
 class LineProfCanvas(QtWidgets.QWidget):
     """Graphique de profil de ligne (QPainter, sans matplotlib)."""
@@ -109,6 +110,9 @@ class ToolsPanel(QtWidgets.QWidget):
     fft2dRequested = QtCore.Signal()          # FFT 2D spatiale sur la ROI courante
     roiConvertRequested = QtCore.Signal()     # export ROI (fixe/suivie) sur la séquence
 
+    def _tr(self, text):
+        return ui_text(self, text)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QtWidgets.QVBoxLayout(self)
@@ -209,8 +213,10 @@ class ToolsPanel(QtWidgets.QWidget):
         self.prof_canvas.set_profile(profile)
         if profile is not None and len(profile) > 0:
             mn, mx, av = float(profile.min()), float(profile.max()), float(profile.mean())
-            self.prof_stats.setText(
-                f"N={len(profile)} px   min={mn:.1f}   max={mx:.1f}   moy={av:.2f}")
+            set_ui_pair(
+                self.prof_stats,
+                f"N={len(profile)} px   min={mn:.1f}   max={mx:.1f}   moy={av:.2f}",
+                f"N={len(profile)} px   min={mn:.1f}   max={mx:.1f}   mean={av:.2f}")
             self.prof_csv_btn.setEnabled(True)
         else:
             self.prof_stats.setText("─")
@@ -219,18 +225,25 @@ class ToolsPanel(QtWidgets.QWidget):
     def update_ruler_pts(self, pts):
         """Met à jour l'affichage de la règle multipoint."""
         if not pts:
-            self.ruler_lbl.setText(
+            set_ui_text(
+                self.ruler_lbl,
                 "Clic = ajouter un point\nClic droit = réinitialiser")
             return
         lines = [f"P{i+1} = ({x}, {y})" for i, (x, y) in enumerate(pts)]
         if len(pts) >= 2:
             total = sum(math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])
                         for i in range(1, len(pts)))
-            lines.append(f"Distance totale : {total:.2f} px")
+            french_total = f"Distance totale : {total:.2f} px"
+            english_total = f"Total distance: {total:.2f} px"
+            lines.append((french_total, english_total))
             x1, y1 = pts[-2]; x2, y2 = pts[-1]
             angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
-            lines.append(f"Angle dernier segment : {angle:.2f}°")
-        self.ruler_lbl.setText("\n".join(lines))
+            lines.append((f"Angle dernier segment : {angle:.2f}°",
+                          f"Last segment angle: {angle:.2f}°"))
+        french_lines = [line[0] if isinstance(line, tuple) else line for line in lines]
+        english_lines = [line[1] if isinstance(line, tuple) else line for line in lines]
+        set_ui_pair(
+            self.ruler_lbl, "\n".join(french_lines), "\n".join(english_lines))
 
     def update_ruler(self, x1, y1, x2, y2):
         self.update_ruler_pts([(x1, y1), (x2, y2)])
@@ -239,17 +252,19 @@ class ToolsPanel(QtWidgets.QWidget):
         """Affiche le spectre FFT 2D (QPixmap) + un libellé d'info."""
         if qpix is not None:
             self.fft2d_label.setPixmap(qpix)
-            self.fft2d_info.setText(info or "─")
+            set_ui_text(self.fft2d_info, info or "─")
         else:
             self.fft2d_label.setPixmap(QtGui.QPixmap())
-            self.fft2d_label.setText(info or "Spectre FFT 2D : tracer une ROI puis cliquer.")
+            set_ui_text(
+                self.fft2d_label,
+                info or "Spectre FFT 2D : tracer une ROI puis cliquer.")
             self.fft2d_info.setText("─")
 
     def _export_csv(self):
         if self._profile is None:
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Exporter profil CSV", "profil_ligne.csv", "CSV (*.csv)")
+            self, ui_text(self, "Exporter profil CSV"), "profil_ligne.csv", "CSV (*.csv)")
         if not path:
             return
         try:
@@ -332,4 +347,3 @@ class FftCanvas(QtWidgets.QWidget):
             p.setPen(QtGui.QColor(255, 200, 50))
             p.drawText(QtCore.QRectF(m, m, W, 14), Qt.AlignCenter,
                        f"Pic : {self.peak_freq:.4f} Hz")
-

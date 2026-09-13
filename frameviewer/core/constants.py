@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Constantes partagees : extensions reconnues, palettes LUT, couleurs nommees."""
+"""Shared media extensions, LUT palettes, and named colors."""
 import cv2
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".wmv", ".flv", ".webm",
@@ -23,7 +23,7 @@ COLORMAPS = {
     "Parula": cv2.COLORMAP_PARULA,
 }
 
-# couleurs nommees (francais) -> RGB 0..255
+# French color aliases accepted by legacy annotation files, in RGB 0..255.
 FRENCH_COLORS = {
     "rouge": (230, 40, 40), "vert": (40, 220, 60), "bleu": (60, 120, 240),
     "jaune": (240, 220, 40), "blanc": (240, 240, 240), "noir": (20, 20, 20),

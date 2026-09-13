@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""I/O image tolerante Unicode (Windows), tri naturel, formatage de duree."""
+"""Unicode-safe image I/O, natural sorting, and duration formatting."""
 import os
 import re
 
@@ -10,11 +10,12 @@ from frameviewer.core.constants import IMAGE_EXTS
 
 
 def dirent_image_path(entry):
-    """-> chemin de `entry` (os.DirEntry, issu de os.scandir) si c'est une image,
-    sinon None. On se fie a l'EXTENSION DU NOM (aucun acces disque -> rapide sur
-    gros dossiers et surtout sur SMB, ou un stat par fichier coute un aller-retour
-    reseau). Seul cas qui resout la cible : un symlink dont le nom n'a PAS
-    d'extension (rare) -- 1 stat uniquement pour ceux-la."""
+    """Return an image path for an ``os.DirEntry``, otherwise ``None``.
+
+    Normal files are classified from the name extension without a stat call.
+    This keeps large and remote directory scans cheap. Only an extensionless
+    symbolic link requires resolving its target.
+    """
     ext = os.path.splitext(entry.name)[1].lower()
     if ext in IMAGE_EXTS:
         return entry.path
@@ -29,10 +30,12 @@ def dirent_image_path(entry):
 
 
 def list_images(folder):
-    """Liste triee (ordre naturel) des images d'un dossier, via os.scandir :
-    UNE enumeration, aucun stat par fichier pour les noms a extension. Gere les
-    dossiers de symlinks (y compris sans extension). [] si le dossier est
-    illisible."""
+    """List folder images in natural order with one ``os.scandir`` pass.
+
+    Names with extensions require no per-file stat call. Symbolic links,
+    including extensionless links, are supported. Return an empty list when
+    the directory cannot be read.
+    """
     out = []
     try:
         with os.scandir(folder) as it:
@@ -46,9 +49,11 @@ def list_images(folder):
 
 
 def list_files(folder, exts):
-    """Liste triee (ordre naturel) des fichiers d'un dossier dont l'extension est
-    dans `exts` (set de '.ext' minuscules), via os.scandir (pas de stat par
-    fichier). [] si le dossier est illisible."""
+    """List files whose lowercase extension belongs to ``exts``.
+
+    The result is naturally sorted and produced without per-file stat calls.
+    Return an empty list when the directory cannot be read.
+    """
     out = []
     try:
         with os.scandir(folder) as it:
@@ -61,7 +66,7 @@ def list_files(folder, exts):
 
 
 def imread_unicode(path, flags=cv2.IMREAD_COLOR):
-    """imread tolerant aux chemins Windows avec accents/unicode."""
+    """Read an image from a Unicode Windows path."""
     try:
         data = np.fromfile(path, dtype=np.uint8)
         if data.size == 0:
@@ -72,7 +77,7 @@ def imread_unicode(path, flags=cv2.IMREAD_COLOR):
 
 
 def imwrite_unicode(path, img):
-    """imwrite tolerant aux chemins unicode (encode + tofile)."""
+    """Write an image to a Unicode path through encode-and-tofile."""
     ext = os.path.splitext(path)[1] or ".png"
     try:
         ok, buf = cv2.imencode(ext, img)
@@ -98,5 +103,4 @@ def fmt_time(sec):
     m = int(sec // 60)
     s = int(sec % 60)
     return f"{m:02d}:{s:02d}"
-
 

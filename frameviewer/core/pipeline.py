@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Pipeline de rendu d'une frame : LUT .cube, fenetrage 16->8 bits, filtres
-FIJI, colormaps, blend fusion. Aucune frame ne quitte ce module autrement
-qu'en ndarray (voir docs/rendering-pipeline.md)."""
+"""Frame rendering pipeline: 3D LUTs, windowing, filters, color maps and blend.
+
+Frames enter and leave this module as NumPy arrays. See
+``docs/rendering-pipeline.md`` for the complete contract.
+"""
 import cv2
 import numpy as np
 
 def load_cube(path):
-    """Parse un LUT 3D .cube. Retourne (lut, size).
+    """Parse a 3D ``.cube`` LUT and return ``(lut, size)``.
 
-    Ordre .cube: l'indice rouge varie le plus vite, puis vert, puis bleu.
-    reshape(size,size,size,3) donne donc lut[b, g, r].
+    In the file order, red changes fastest, followed by green and blue.
+    Therefore ``reshape(size, size, size, 3)`` produces ``lut[b, g, r]``.
     """
     size = None
     data = []
@@ -41,7 +43,7 @@ def load_cube(path):
 
 
 def apply_cube(frame_bgr, lut, size):
-    """Applique une LUT 3D (.cube) par interpolation trilineaire. Visuel seulement."""
+    """Apply a display-only 3D LUT using trilinear interpolation."""
     rgb = frame_bgr[..., ::-1].astype(np.float32) / 255.0
     c = rgb * (size - 1)
     i0 = np.floor(c).astype(np.int32)
@@ -64,13 +66,13 @@ def apply_cube(frame_bgr, lut, size):
     c1 = c01 * (1 - fg) + c11 * fg
     out = c0 * (1 - fb) + c1 * fb
     out = np.clip(out * 255.0, 0, 255).astype(np.uint8)
-    return np.ascontiguousarray(out[..., ::-1])  # -> BGR
+    return np.ascontiguousarray(out[..., ::-1])  # RGB to BGR
 
 
-# --- pipeline de rendu (partage GUI + worker de conversion) ----------------
+# Rendering pipeline shared by the GUI and conversion workers.
 
 def window8(arr, lo, hi):
-    """Fenetrage lineaire [lo,hi] -> [0,255] (style FIJI Brightness/Contrast)."""
+    """Map ``[lo, hi]`` linearly to ``[0, 255]``."""
     if hi <= lo:
         hi = lo + 1.0
     out = (arr.astype(np.float32) - float(lo)) * (255.0 / (float(hi) - float(lo)))
@@ -78,12 +80,12 @@ def window8(arr, lo, hi):
 
 
 def to_intensity(raw):
-    """Reduit un tableau natif en 2D d'intensite (conserve la dynamique)."""
+    """Reduce a native array to 2D intensity while preserving its range."""
     if raw.ndim == 2:
         return raw
     if raw.shape[2] == 1:
         return raw[:, :, 0]
-    if raw.shape[2] == 4:       # BGRA -> BGR avant conversion
+    if raw.shape[2] == 4:       # Drop alpha before conversion.
         raw = raw[:, :, :3]
     if raw.dtype == np.uint8:
         return cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
@@ -91,7 +93,7 @@ def to_intensity(raw):
 
 
 def auto_window(inten, pg=0.35, pd=0.35):
-    """Fenetre auto par saturation: pg% en bas, pd% en haut (facon FIJI)."""
+    """Compute an automatic window with low/high percentile saturation."""
     g = np.asarray(inten, dtype=np.float32).ravel()
     if g.size == 0:
         return 0.0, 1.0
@@ -107,7 +109,7 @@ def auto_window(inten, pg=0.35, pd=0.35):
 
 
 def auto_window_sigma(inten, n_sigma=3.0):
-    """Fenetre auto 3-sigma : mean +/- n_sigma*std, borne aux min/max reels."""
+    """Compute a mean +/- N-sigma window clipped to the observed range."""
     g = np.asarray(inten, dtype=np.float64).ravel()
     if g.size == 0:
         return 0.0, 1.0
@@ -121,10 +123,10 @@ def auto_window_sigma(inten, n_sigma=3.0):
 
 
 def apply_filters(bgr, flags):
-    """Filtres rapides facon FIJI sur une image BGR uint8.
+    """Apply lightweight inspection filters to a uint8 BGR image.
 
-    flags: dict de bool {median, smooth, clahe, sharpen, edges, invert}.
-    Ordre: median -> smooth -> clahe -> sharpen (nettete) -> edges (bords) -> invert.
+    ``flags`` is a boolean mapping for median, smooth, CLAHE, sharpen, edges,
+    and invert. Operations run in that order.
     """
     if not flags:
         return bgr
@@ -134,9 +136,8 @@ def apply_filters(bgr, flags):
     if flags.get("smooth"):
         img = cv2.GaussianBlur(img, (3, 3), 0)
     if flags.get("clahe"):
-        # Egalisation d'histogramme adaptative a contraste limite (FIJI "Enhance
-        # Local Contrast / CLAHE"). On l'applique sur la luminance pour preserver
-        # les couleurs d'une LUT.
+        # Apply contrast-limited adaptive histogram equalization to luminance
+        # so colors produced by a LUT remain stable.
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         if img.ndim == 3:
             lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
@@ -160,8 +161,8 @@ def apply_filters(bgr, flags):
 
 def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
                  full_range=(0, 255), filters=None):
-    """raw (natif) -> image BGR uint8 prete a afficher / enregistrer."""
-    # Normalise : BGRA -> BGR (supprime canal alpha)
+    """Render a native frame as uint8 BGR ready for display or export."""
+    # Normalize BGRA to BGR by dropping alpha.
     if raw.ndim == 3 and raw.shape[2] == 4:
         raw = raw[:, :, :3]
     is_color_u8 = (raw.ndim == 3 and raw.shape[2] == 3 and raw.dtype == np.uint8)
@@ -169,7 +170,7 @@ def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
     fr0, fr1 = full_range
     engaged = not (lo <= fr0 + 1e-6 and hi >= fr1 - 1e-6)
     if lut_data is None and (is_color_u8 or is_color_other):
-        # Preserve couleur (uint8 ou uint16/float 3ch) : fenetre par canal
+        # Preserve color for 3-channel arrays and window each channel.
         base = (window8(raw, lo, hi)
                 if (engaged or is_color_other)
                 else np.ascontiguousarray(raw))
@@ -190,7 +191,7 @@ def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
     return np.ascontiguousarray(base)
 
 
-# --------------------------- fusion / blend --------------------------------
+# -------------------------------- blending ---------------------------------
 
 BLEND_MODES = [
     ("alpha",  "Alpha (fondu)"),
@@ -202,7 +203,7 @@ BLEND_MODES = [
 
 
 def blend_frames(a, b, alpha=0.5, mode="alpha"):
-    """Fusionne deux images BGR de même taille selon `mode`. alpha ∈ [0,1]."""
+    """Blend two same-sized BGR images using ``mode`` and alpha in ``[0, 1]``."""
     if a is None and b is None:
         return None
     if a is None:
@@ -237,11 +238,10 @@ def blend_frames(a, b, alpha=0.5, mode="alpha"):
             out[:, :cut] = a[:, :cut]
         return out
     if mode == "add_ab":
-        # A + (alpha·100 %)·B, écrêté (clamp) sur dépassement 0..255
+        # A + alpha*B, clamped to 0..255.
         return cv2.addWeighted(a, 1.0, b, alpha, 0.0)
     if mode == "add_ba":
-        # B + (alpha·100 %)·A, écrêté (clamp) sur dépassement 0..255
+        # B + alpha*A, clamped to 0..255.
         return cv2.addWeighted(b, 1.0, a, alpha, 0.0)
-    return cv2.addWeighted(a, 1.0 - alpha, b, alpha, 0.0)  # alpha (défaut)
-
+    return cv2.addWeighted(a, 1.0 - alpha, b, alpha, 0.0)  # Default alpha blend.
 

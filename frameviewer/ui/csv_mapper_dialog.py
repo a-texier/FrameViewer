@@ -84,7 +84,7 @@ class CsvColumnMapperDialog(QtWidgets.QDialog):
     def _on_accept(self):
         missing = [r for r in self._roles
                   if r not in self._optional
-                  and self._combos[r].currentText() == "(aucune)"]
+                  and self._combos[r].currentIndex() == 0]
         if missing:
             QtWidgets.QMessageBox.warning(
                 self, "Colonnes manquantes",
@@ -95,6 +95,5 @@ class CsvColumnMapperDialog(QtWidgets.QDialog):
     def result_mapping(self):
         out = {}
         for role, combo in self._combos.items():
-            txt = combo.currentText()
-            out[role] = None if txt == "(aucune)" else txt
+            out[role] = None if combo.currentIndex() == 0 else combo.currentText()
         return out

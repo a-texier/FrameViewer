@@ -1,26 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Modele de graphe de blocs pour construire un plugin "formes" (hook
-get_overlays) SANS ecrire de Python -- scope au besoin de ce depot (pas un
-langage visuel generique) : lire une colonne CSV, comparer/combiner des
-valeurs, produire une forme (meme schema que les overlays SIDECAR/plugin, voir
-docs/overlays.md et docs/plugins.md), qu'un bloc "Sortie" collecte pour la
-frame courante.
+"""Block-graph model for building shape plugins without writing Python.
 
-Le graphe est INTERPRETE directement a chaque frame (evaluate_graph_for_frame)
--- pas de generation de code Python a relire. Serialise en JSON a cote du
-plugin.py genere (voir graph_runtime.py / ui/node_graph_editor.py).
-
-Aucun import Qt ici -- testable/utilisable sans interface graphique.
+The deliberately focused graph reads CSV values, combines or compares them,
+and emits overlay shapes for the current frame. It is interpreted directly,
+serialized as JSON, and has no Qt dependency.
 """
 
 
 class NodeType:
-    """Decrit un type de bloc : ports d'entree/sortie typés (noms simples,
-    pas de verification de type stricte -- coherence laissee a l'auteur du
-    graphe, comme les autres hooks plugin) + une fonction d'evaluation pure
-    `evaluate(params, inputs) -> dict(outputs)`. `params` sont des reglages
-    edites directement dans le bloc (pas de port -- ex. le nom de colonne,
-    l'operateur de comparaison)."""
+    """Describe ports, editable parameters, and a pure evaluation function."""
 
     def __init__(self, key, label, category, inputs, outputs, evaluate,
                 params=None, variadic_input=None):
@@ -31,9 +19,7 @@ class NodeType:
         self.outputs = list(outputs)        # [(name, type_hint)]
         self.evaluate = evaluate
         self.params = list(params or [])    # [(name, type_hint, default)]
-        # nom du port d'entree qui accepte PLUSIEURS connexions (ex. le
-        # bloc Sortie collecte toutes les formes qui y arrivent) ; None
-        # sinon (un port normal n'accepte qu'UNE connexion).
+        # Optional input port that accepts multiple incoming connections.
         self.variadic_input = variadic_input
 
 
@@ -63,10 +49,7 @@ def _parse_rgb(text):
 
 
 def vue_to_index(v):
-    """Convertit un choix de vue ("active"|"vue1"|"vue2"...) en index de
-    position dans le multivue (0 = vue 1 = primaire, 1 = vue 2, ...), ou None
-    pour "active" (= comportement historique : dessine sur la vue active, sans
-    passer par la couche multivue). Voir multiview.SplitCanvas."""
+    """Convert an active/view-N selector to a zero-based multi-view index."""
     if not v or v == "active":
         return None
     if v.startswith("vue"):
@@ -94,10 +77,8 @@ register(NodeType(
 ))
 
 register(NodeType(
-    # numero de la frame courante, injecte par evaluate_graph_for_frame sous
-    # la cle reservee "__frame__" -- permet un graphe qui reagit a la frame
-    # (ex. n'afficher une forme qu'a partir d'une certaine frame) sans colonne
-    # CSV dediee.
+    # The reserved ``__frame__`` value lets graphs react to the current frame
+    # without requiring a dedicated CSV column.
     "frame_index", "Numero de frame", "Source",
     inputs=[], outputs=[("valeur", "number")],
     evaluate=lambda p, i, row: {"valeur": _to_float(row.get("__frame__"), 0.0)},
@@ -202,9 +183,7 @@ register(NodeType(
 ))
 
 register(NodeType(
-    # segment reliant deux points (x1,y1)-(x2,y2) -- brique de base pour
-    # visualiser des correspondances de keypoints (paires SIFT et similaires)
-    # a l'interieur d'une meme vue.
+    # Segment connecting two points inside one view.
     "line_shape", "Forme : Segment (2 points)", "Forme",
     inputs=[("x1", "number"), ("y1", "number"), ("x2", "number"), ("y2", "number"),
            ("couleur", "color"), ("epaisseur", "number"), ("condition", "bool")],
@@ -219,10 +198,8 @@ register(NodeType(
 ))
 
 register(NodeType(
-    # segment reliant un point de la vue A a un point de la vue B (multivue) --
-    # visualiser des correspondances de keypoints ENTRE deux vues (paires SIFT
-    # d'une image a l'autre). Dessine par la couche MultiViewOverlay, pas par
-    # le moteur de la vue active. va/vb = index de vue (vue1=0, vue2=1...).
+    # Cross-view segment rendered by the multi-view overlay layer. ``va`` and
+    # ``vb`` are zero-based view indices.
     "interview_segment", "Segment inter-vues", "Inter-vues",
     inputs=[("xa", "number"), ("ya", "number"), ("xb", "number"), ("yb", "number"),
            ("couleur", "color"), ("epaisseur", "number"), ("condition", "bool")],
@@ -271,10 +248,7 @@ class Graph:
         self.nodes = dict(nodes or {})
         self.edges = list(edges or [])
         self.csv_path = csv_path
-        # nom de la colonne CSV qui identifie la frame -- utilisee pour
-        # regrouper les lignes par frame AVANT d'evaluer le graphe (le
-        # graphe lui-meme evalue UNE ligne a la fois, voir
-        # evaluate_graph_for_frame) ; pas un port du graphe.
+        # CSV column used to group rows before evaluating one row at a time.
         self.frame_column = frame_column
 
     def to_dict(self):
@@ -286,7 +260,7 @@ class Graph:
         return cls(d.get("nodes"), d.get("edges"), d.get("csv_path"), d.get("frame_column"))
 
     def _incoming(self, node_id):
-        """{port_name: [(src_id, src_port), ...]} pour ce noeud."""
+        """Return incoming source ports grouped by destination port."""
         out = {}
         for src_id, src_port, dst_id, dst_port in self.edges:
             if dst_id == node_id:
@@ -294,7 +268,7 @@ class Graph:
         return out
 
     def _topo_order(self):
-        """Ordre d'evaluation (dependances d'abord) -- detecte les cycles."""
+        """Return dependency-first evaluation order and detect cycles."""
         deps = {nid: set() for nid in self.nodes}
         for src_id, _sp, dst_id, _dp in self.edges:
             if dst_id in deps and src_id in self.nodes:
@@ -319,11 +293,7 @@ class Graph:
         return order
 
     def evaluate(self, row):
-        """Evalue tout le graphe pour UNE ligne CSV (dict colonne->valeur).
-        Renvoie la liste des formes (dicts) collectees par le(s) bloc(s)
-        Sortie. Une exception dans un bloc individuel n'interrompt pas les
-        autres blocs Sortie -- elle est levee normalement (capturee plus
-        haut, cote plugin/loader, comme tout hook)."""
+        """Evaluate the complete graph for one CSV row and return its shapes."""
         order = self._topo_order()
         results = {}
         shapes = []
@@ -337,18 +307,15 @@ class Graph:
             for port_name, _t in nt.inputs:
                 srcs = incoming.get(port_name, [])
                 if nt.variadic_input == port_name:
-                    continue   # collecte separement ci-dessous
+                    continue   # Collected separately below.
                 if srcs:
                     src_id, src_port = srcs[0]
                     inputs[port_name] = results.get(src_id, {}).get(src_port)
             out = nt.evaluate(node.get("params", {}), inputs, row)
             results[nid] = out
             if nt.variadic_input:
-                # le bloc Sortie estampille les formes collectees avec sa vue
-                # cible (multivue) : "active" -> aucun estampillage (dessin sur
-                # la vue active, historique) ; "vueN" -> view=N-1, route vers
-                # la couche MultiViewOverlay. Une forme deja typee inter-vues
-                # (segment_inter_vues) porte deja ses propres vues -> intacte.
+                # Output nodes stamp ordinary shapes with a target view. A
+                # cross-view shape already carries both indices and is kept.
                 vidx = vue_to_index(node.get("params", {}).get("vue", "active"))
                 for src_id, src_port in incoming.get(nt.variadic_input, []):
                     val = results.get(src_id, {}).get(src_port)
@@ -361,16 +328,12 @@ class Graph:
 
 
 def evaluate_graph_for_frame(graph, rows, frame_idx=None):
-    """`rows` : liste de dicts colonne->valeur pour la frame (0..N
-    detections). `frame_idx` : numero de la frame courante, injecte sous la
-    cle reservee "__frame__" pour le bloc "Numero de frame" (une copie de
-    chaque ligne est faite, les dicts fournis par l'appelant ne sont jamais
-    modifies). Renvoie la liste combinee des formes de toutes les lignes.
+    """Evaluate all rows for one frame and combine their shapes.
 
-    Cas particulier : un graphe SANS aucune ligne CSV (rows vide) mais qui
-    n'utilise que des sources non-CSV (frame_index, constantes) doit quand
-    meme etre evalue une fois par frame -- on evalue alors une ligne
-    virtuelle ne contenant que le numero de frame."""
+    A copied row receives the reserved current-frame value. Graphs with only
+    non-CSV sources are evaluated once against a virtual row when no data row
+    exists.
+    """
     out = []
     if not rows:
         if frame_idx is not None and _graph_has_non_csv_source(graph):
@@ -384,7 +347,5 @@ def evaluate_graph_for_frame(graph, rows, frame_idx=None):
 
 
 def _graph_has_non_csv_source(graph):
-    """True si le graphe contient au moins une source independante du CSV
-    (bloc "Numero de frame") -- sert a decider s'il faut l'evaluer meme sans
-    ligne CSV pour la frame."""
+    """Return whether the graph has a source independent of CSV rows."""
     return any(n.get("type") == "frame_index" for n in graph.nodes.values())

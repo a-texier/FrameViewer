@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Pont entre le graphe de blocs (frameviewer/plugins/graph.py) et le
-contrat de plugin (FrameViewerPlugin) -- un plugin "graphe" est un plugin
-COMME UN AUTRE (meme dossier plugins_<nom>/, meme loader, memes hooks) :
-seule sa logique vit dans un fichier graph.json au lieu d'etre ecrite a la
-main. Le plugin.py genere par l'editeur de graphe
-(ui/node_graph_editor.py) est un simple wrapper qui sous-classe
-GraphPlugin -- voir docs/plugins.md."""
+"""Bridge the visual block graph and the standard plugin contract.
+
+A graph package uses the same loader and hooks as a code plugin, while its
+logic lives in ``graph.json``. The editor generates a small ``plugin.py``
+wrapper around ``GraphPlugin``.
+"""
 import json
 import os
 
@@ -16,9 +15,7 @@ GRAPH_FILE = "graph.json"
 
 
 class GraphPlugin(FrameViewerPlugin):
-    """Classe de base des plugins "graphe". NE PAS sous-classer a la main
-    pour un autre usage : le plugin.py genere sera ECRASE a la prochaine
-    sauvegarde depuis l'editeur de graphe."""
+    """Base class for editor-generated graph plugins."""
 
     def on_load(self, api):
         self._graph = None
@@ -36,7 +33,7 @@ class GraphPlugin(FrameViewerPlugin):
         rows = api.read_csv_dict(path)
         frame_col = self._graph.frame_column if self._graph else None
         if not frame_col and rows:
-            frame_col = next(iter(rows[0]))   # repli : 1re colonne du CSV
+            frame_col = next(iter(rows[0]))   # Fall back to the first CSV column.
         by_frame = {}
         for row in rows:
             try:
@@ -65,11 +62,7 @@ class GraphPlugin(FrameViewerPlugin):
         try:
             return evaluate_graph_for_frame(self._graph, rows, frame_idx)
         except Exception as ex:
-            # une erreur de graphe (cycle, bloc invalide...) ne doit pas
-            # desactiver tout le plugin pour une seule frame en erreur --
-            # contrairement aux autres hooks, celui-ci est appele a CHAQUE
-            # frame pendant que l'utilisateur edite le graphe en direct ;
-            # le proteger ici garde le plugin actif (donc rechargeable)
-            # pendant qu'il corrige, au lieu de le desactiver au 1er essai.
+            # A graph error on one frame must not disable the complete plugin.
+            # Keeping it enabled allows live editing and immediate reloads.
             api.log(f"graphe : erreur d'evaluation -- {ex}")
             return []

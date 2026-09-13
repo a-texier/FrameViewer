@@ -1,21 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Runner headless pour debugger un plugin FrameViewer HORS interface.
+"""Run and debug a FrameViewer plugin outside the Qt interface.
 
-But : tester un plugin comme un simple backend -- on lui donne une frame (celle
-exportee depuis l'app, ou une image), on appelle ses hooks de rendu, et on
-ecrit la sortie sur disque. Aucun Qt, aucune fenetre : ca tourne dans un
-interpreteur normal (ton env Python), donc pandas & co marchent, et surtout on
-peut poser des BREAKPOINTS dans plugin.py et lancer sous le debugger VS Code.
-Rien en dur : aucun chemin machine, tout vient des arguments et de sys.path.
+The runner accepts an exported frame or image, calls rendering hooks, and
+writes their output to disk. It uses the selected Python environment, which
+makes breakpoints and external dependencies straightforward. Paths come only
+from arguments and runtime discovery.
 
-Ca tourne dans l'interpreteur qui le lance (ton env Python habituel).
-
-Depuis l'app : bouton « Console » puis « Exporter frame + commande VS Code »
-ecrit la frame courante dans %APPDATA%/FrameViewer/debug/ et affiche la commande
-prete a coller (ou utilise .vscode/launch.json « Debug plugin (frame courante) »).
-
-Exemple (depuis le dossier FrameViewer, celui qui contient le package
-frameviewer/) :
+Example from the directory containing the ``frameviewer`` package:
 
     python -m frameviewer.plugins.debug_runner \
         --plugin plugins_demo_showcase \
@@ -23,10 +14,7 @@ frameviewer/) :
         --input "csv_data=C:/chemin/vers/data.csv" \
         --frame-index 0
 
-Sorties ecrites dans <dossier de la frame>/out/ (ou --out) :
-  overlay.png     : le BGRA renvoye par render_overlay (fond transparent)
-  composited.png  : cet overlay compose PAR-DESSUS la frame (rendu final)
-  panel.png       : l'image renvoyee par render_panel (carte du plugin)
+Outputs are written under the frame directory's ``out`` folder or ``--out``.
 """
 import argparse
 import glob
@@ -37,7 +25,7 @@ import types
 
 
 # --------------------------------------------------------------------------
-# Faux MainWindow : uniquement ce que PluginAPI touche, adosse a une frame.
+# Minimal MainWindow substitute backed by one frame.
 # --------------------------------------------------------------------------
 class _DummyStatusBar:
     def showMessage(self, *a, **k):
@@ -70,9 +58,7 @@ class _SingleFrameSource:
 
 
 class HeadlessMW:
-    """Stand-in minimal de MainWindow pour executer un plugin sans interface.
-    Pipeline d'affichage neutre (raw == displayed) : suffisant pour tester les
-    overlays ; les elements (cases On/Off) sont tous consideres actifs."""
+    """Minimal MainWindow substitute for running a plugin without the UI."""
 
     def __init__(self, frame, name="debug", elements=None):
         self._raw = frame
@@ -104,11 +90,10 @@ class HeadlessMW:
 
 
 # --------------------------------------------------------------------------
-# Helpers frame / image
+# Frame and image helpers.
 # --------------------------------------------------------------------------
 def _to_bgr8(img):
-    """Normalise une frame quelconque (gris/BGR/BGRA, uint8/uint16/float) en
-    BGR 8 bits, pour composer et enregistrer sans surprise."""
+    """Normalize grayscale/BGR/BGRA arrays to uint8 BGR."""
     import cv2
     import numpy as np
     if img.dtype != np.uint8:
@@ -123,7 +108,7 @@ def _to_bgr8(img):
 
 
 def _composite(base_bgr, overlay_bgra):
-    """Compose un overlay BGRA par-dessus une base BGR (alpha par pixel)."""
+    """Alpha-composite a BGRA overlay over a BGR base."""
     import numpy as np
     base = _to_bgr8(base_bgr)
     h = min(base.shape[0], overlay_bgra.shape[0])
@@ -152,8 +137,7 @@ def _load_frame(args):
 
 
 def _resolve_plugin_folder(name):
-    """Accepte un chemin de dossier, un nom de dossier (plugins_xxx) ou un id.
-    Cherche dans les dossiers de plugins connus (livre + perso)."""
+    """Resolve a plugin path, package name, or identifier from known roots."""
     from frameviewer.plugins.loader import (PLUGIN_FOLDER_PREFIX, plugins_roots)
     if os.path.isdir(name) and os.path.isfile(os.path.join(name, "plugin.py")):
         return os.path.abspath(name)
@@ -169,18 +153,16 @@ def _resolve_plugin_folder(name):
 
 
 def _load_plugin_instance(folder):
-    """Importe plugin.py par compilation directe (memes regles que le loader,
-    sans cache .pyc) et renvoie (instance, manifest)."""
+    """Compile plugin.py directly and return its instance and manifest."""
     from frameviewer.plugins import manifest as _manifest
     mod_path = os.path.join(folder, "plugin.py")
     with open(mod_path, "r", encoding="utf-8") as f:
         src = f.read()
     module = types.ModuleType("frameviewer_plugin_debug")
     module.__file__ = mod_path
-    # filename = chemin reel -> les breakpoints VS Code dans plugin.py se lient.
+    # The real filename lets debugger breakpoints bind to plugin.py.
     code = compile(src, mod_path, "exec")
-    # meme mecanique que le loader : dossier du plugin sur sys.path -> `import
-    # mon_helper` (fichier voisin) fonctionne.
+    # Match loader behavior so sibling helper imports work.
     if folder not in sys.path:
         sys.path.insert(0, folder)
     exec(code, module.__dict__)
@@ -191,19 +173,12 @@ def _load_plugin_instance(folder):
 
 
 def _debug_dir(folder):
-    """Dossier debug/ propre au plugin : la ou l'app exporte les frames de test
-    et ou le runner va les chercher pour le choix interactif."""
+    """Return the plugin-specific debug directory."""
     return os.path.join(folder, "debug")
 
 
 def _deployed_plugin_roots():
-    """Racines de plugins DEPLOYES, comme les verrait l'app installee : user
-    config (AppData) et 'a cote de l'exe'. En mode source (F5 depuis le depot),
-    'a cote de l'exe' pointe sur les dossiers d'exe construits par les scripts de
-    build (output_compacte / output_with_folder) s'ils existent. La copie source
-    editable du depot (FrameViewer_Local/plugins) est volontairement EXCLUE quand
-    un exe est construit : on debugge le plugin livre, pas la copie source. Repli
-    sur la source uniquement si aucune racine deployee n'existe."""
+    """Return deployed plugin roots as seen by the installed application."""
     from frameviewer.plugins.loader import plugins_root, user_plugins_dir
     roots = [(user_plugins_dir(), "utilisateur")]
     if getattr(sys, "frozen", False):
@@ -220,8 +195,7 @@ def _deployed_plugin_roots():
 
 
 def _list_plugins_ordered():
-    """[(label, folder)] : plugins DEPLOYES (user AppData + a cote de l'exe) ;
-    dedup par nom de dossier (le 1er vu gagne). Voir _deployed_plugin_roots."""
+    """List deployed plugin folders in priority order without duplicates."""
     from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX
     out, seen = [], set()
     for root, tag in _deployed_plugin_roots():
@@ -238,8 +212,7 @@ def _list_plugins_ordered():
 
 
 def _pick(title, items):
-    """Choix interactif en terminal : items = [(label, valeur)]. 1 seul choix ->
-    auto. Renvoie la valeur choisie ; SystemExit si vide ou entree invalide."""
+    """Select one labeled value interactively, choosing a sole item directly."""
     if not items:
         raise SystemExit(f"{title} : aucune option disponible.")
     if len(items) == 1:
@@ -259,8 +232,7 @@ def _pick(title, items):
 
 
 def _frame_index_from_name(path):
-    """Deduit l'index de frame du nom de fichier exporte par l'app
-    (frame<NNNN>.npy). Renvoie l'int ou None si le pattern ne matche pas."""
+    """Extract a frame index from an exported frame filename."""
     if not path:
         return None
     import re
@@ -269,8 +241,7 @@ def _frame_index_from_name(path):
 
 
 def _input_candidates(folder):
-    """Fichiers proposables comme entrees du plugin : tout ce qui est dans data/
-    et debug/ SAUF les frames .npy et les sorties du runner (debug/out/)."""
+    """List candidate plugin inputs while excluding frames and runner outputs."""
     cands = []
     for sub in ("data", "debug"):
         d = os.path.join(folder, sub)
@@ -322,17 +293,14 @@ def main(argv=None):
 
     from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX
 
-    # 1) Plugin : argument, sinon choix interactif. On importe d'abord le STRICT
-    #    minimum (leger) pour que le menu s'affiche TOUT DE SUITE ; cv2/PySide6 et
-    #    le rapport d'environnement (lents) sont importes plus bas, apres les choix.
+    # Resolve the plugin before importing heavy diagnostics dependencies.
     if args.plugin:
         folder = _resolve_plugin_folder(args.plugin)
     else:
         folder = _pick("Quel plugin debugger ?", _list_plugins_ordered())
     dbg = _debug_dir(folder)
 
-    # 2) Frame : --npy/--image explicite, sinon choix parmi les .npy exportes
-    #    dans <plugin>/debug/ (associes a CE plugin).
+    # Resolve an explicit frame or select one from the plugin debug directory.
     frame_src = args.npy or args.image
     if args.npy or args.image:
         frame = _load_frame(args)
@@ -344,19 +312,14 @@ def main(argv=None):
             frame_src = _pick("Quelle frame ?", npys)
             frame = np.load(frame_src)
         else:
-            # Aucune frame exportee : au lieu de s'arreter, on donne une frame de
-            # test grise pour que le plugin s'execute quand meme (les demos qui
-            # generent/dessinent leurs donnees marchent directement sous F5).
+            # A neutral synthetic frame keeps no-input plugin debugging usable.
             print(f"Aucune frame exportee dans {dbg}\n"
                   "-> frame de test synthetique (gris 720x1280). Pour une vraie "
                   "frame : app > Console > Exporter frame courante.")
             frame = np.full((720, 1280, 3), 90, np.uint8)
             frame_src = None
     contract = _parse_inputs(args.input)
-    # Entrees declarees NON fournies en ligne de commande -> choix interactif :
-    # on propose les fichiers trouves dans data/ et debug/ du plugin (le .npy de
-    # frame est exclu). Sans candidat ou si l'utilisateur passe, l'entree reste
-    # None (le plugin utilise alors son fallback / ne dessine rien).
+    # Offer discovered data files for declared inputs not supplied explicitly.
     if not args.input:
         from frameviewer.plugins import manifest as _manifest
         declared = [i.get("name") for i in _manifest.load(folder).get("inputs", [])
@@ -369,9 +332,7 @@ def main(argv=None):
                 chosen = _pick(f"Fichier pour l'entree self.{name} ?", items)
                 if chosen:
                     contract[name] = chosen
-    # index explicite prioritaire ; sinon deduit du nom (frameNNNN.npy) ; sinon 0.
-    # L'app nomme l'export frame<cur:04d>.npy et fait num_image = frame_idx + 1 :
-    # sans cette deduction, le debug dessinait la frame 0 sur une autre image.
+    # Prefer an explicit frame index, then the exported filename, then zero.
     frame_idx = args.frame_index
     if frame_idx is None:
         frame_idx = _frame_index_from_name(frame_src)
@@ -380,8 +341,7 @@ def main(argv=None):
         else:
             print(f"(frame-index deduit du nom : {frame_idx})")
 
-    # imports lourds + rapport d'environnement : APRES les choix, pour ne pas
-    # retarder l'affichage du menu (cv2/PySide6/pandas mettent plusieurs secondes).
+    # Import heavy diagnostics dependencies only after interactive choices.
     import cv2
     from frameviewer.plugins.api import FrameViewerPlugin, PluginAPI
     from frameviewer.plugins.loader import environment_report
@@ -409,8 +369,7 @@ def main(argv=None):
     except Exception:
         print("on_load a leve une exception :")
         traceback.print_exc()
-    # injecte self.<nom> = chemin APRES on_load (le loader lie les entrees avant
-    # CHAQUE rendu, donc a l'etat courant ; on_load les met souvent a None).
+    # Bind current input paths after on_load, matching the rendering contract.
     for inp in manifest.get("inputs", []) or []:
         nm = inp.get("name")
         if nm:
@@ -422,10 +381,7 @@ def main(argv=None):
     cls = type(inst)
     wrote = []
 
-    # composited.png = la VUE COMPLETE telle qu'incrustee dans l'app : frame +
-    # render_patch (coin) + render_overlay (BGRA plein cadre) + get_overlays
-    # (formes SIDECAR : croix, points...). On accumule les 3 couches dans le meme
-    # ordre que MainWindow._display (patch bake, puis overlay alpha, puis SIDECAR).
+    # Build composited.png in the same patch, alpha-overlay, shape order as UI.
     from frameviewer.core.annotations import bake_sidecar_overlays
     from frameviewer.core.plugin_render import composite_patches
     full = _to_bgr8(frame)

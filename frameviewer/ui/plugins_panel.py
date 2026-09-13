@@ -16,6 +16,8 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
+from frameviewer.ui.i18n import set_ui_text, ui_text
+
 
 # ---------------------------------------------------------------------------
 # Gabarit d'un nouveau plugin code : autonome et commente. Les entrees
@@ -442,7 +444,8 @@ class InputDropZone(QtWidgets.QFrame):
         self.fileChanged.emit(self._name, path)
 
     def _pick(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"Fichier pour « {self._name} »")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, ui_text(self, f"Fichier pour « {self._name} »"))
         if path:
             self._set(os.path.normpath(path))
 
@@ -576,7 +579,7 @@ class PluginCard(QtWidgets.QFrame):
     def _on_enable(self, on):
         self._mw._plugin_loader.set_enabled(self.pid, on)
         self._mw._save_enabled_plugin_ids()
-        self._badge.setText("Actif" if on else "Inactif")
+        set_ui_text(self._badge, "Actif" if on else "Inactif")
         self._badge.setStyleSheet(f"background:{'#3a3' if on else '#777'}; color:white; "
                                   "border-radius:3px; padding:1px 8px; font-size:10px;")
         self._mw._repaint_views()
@@ -810,7 +813,7 @@ class PluginCard(QtWidgets.QFrame):
             self._preview.setText("")
         else:
             self._preview.setPixmap(QtGui.QPixmap())
-            self._preview.setText("(aucun aperçu pour cette frame)")
+            set_ui_text(self._preview, "(aucun aperçu pour cette frame)")
             self._preview.setStyleSheet("color:#888; font-size:11px;")
 
 
@@ -959,7 +962,9 @@ class PluginsPanel(QtWidgets.QWidget):
         self._kind = kind
         self._b_code.setChecked(kind == "code")
         self._b_graph.setChecked(kind == "graph")
-        self._b_new.setText("+ Plugin Code" if kind == "code" else "+ Plugin Graphe")
+        set_ui_text(
+            self._b_new,
+            "+ Plugin Code" if kind == "code" else "+ Plugin Graphe")
         self.refresh()
 
     def _new_plugin(self):
@@ -1031,13 +1036,15 @@ class PluginsPanel(QtWidgets.QWidget):
         n = len([l for l in loader.plugins if l.kind == self._kind])
         act = len([l for l in loader.enabled_plugins() if l.kind == self._kind])
         if lp is None:
-            self._summary.setText(f"{n} plugin(s) {self._kind}, {act} actif(s).")
+            set_ui_text(
+                self._summary, f"{n} plugin(s) {self._kind}, {act} actif(s).")
         else:
             st = self._mw._plugin_state_for(lp.plugin_id)
             n_in = sum(1 for i in st["inputs"] if not i.get("hidden"))
             sets = self._mw._visible_contracts(lp.plugin_id)
             last = lp.last_run or "—"
-            self._summary.setText(
+            set_ui_text(
+                self._summary,
                 f"Plugin : {lp.name}   |   Entrées : {n_in}   |   "
                 f"Jeux actifs : {len(sets)}   |   Statut : "
                 f"{'● Actif' if lp.enabled else '○ Inactif'}   |   "

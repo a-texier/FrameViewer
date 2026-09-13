@@ -6,6 +6,8 @@ import os
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
+from frameviewer.ui.i18n import ui_text
+
 class _RangeBar(QtWidgets.QWidget):
     """Barre horizontale a 2 poignees glissables (bleu) pour choisir une
     plage [lo, hi] de frames — utilisee par LayerExportDialog."""
@@ -244,7 +246,7 @@ class LayerExportDialog(QtWidgets.QDialog):
             self._status.setText("Coche au moins une track .ver.")
             return
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Dossier de destination pour les .ver...")
+            self, ui_text(self, "Dossier de destination pour les .ver..."))
         if not folder:
             return
         if self._rb_merge.isChecked():

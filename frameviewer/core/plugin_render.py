@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Composition des "vignettes" plugin (hook FrameViewerPlugin.render_patch)
-dans un coin de la frame -- UNE seule implementation, partagee entre
-l'affichage live et l'export (voir MainWindow._display /
-_export_frame_as_viewed), pour ne pas reproduire le doublon QPainter/cv2
-deja connu de ce depot pour les overlays SIDECAR (voir docs/overlays.md)."""
+"""Composite plugin patches and full-frame overlays onto BGR frames.
+
+The live display and export paths share this implementation so their output
+remains identical. See ``MainWindow._display`` and
+``_export_frame_as_viewed``.
+"""
 import cv2
 import numpy as np
 
@@ -11,12 +12,11 @@ _CORNERS = ("tl", "tr", "bl", "br")
 
 
 def alpha_over(bgr, bgra):
-    """Compose un overlay BGRA (canal alpha) par-dessus une image BGR, au
-    niveau pixel -- utilise pour les overlays plugin "code" (hook
-    render_overlay). Le resultat est une COPIE de `bgr` (jamais un buffer
-    partage). `bgra` est recadre aux dimensions de `bgr` si besoin (un plugin
-    qui renvoie une taille legerement differente ne casse pas l'affichage).
-    Renvoie `bgr` tel quel si `bgra` est vide/None."""
+    """Alpha-composite a BGRA overlay over a BGR image.
+
+    The result is a copy. The overlay is clipped to the base dimensions, and
+    an empty or invalid overlay leaves the base image unchanged.
+    """
     if bgr is None or bgra is None or getattr(bgra, "size", 0) == 0:
         return bgr
     if bgra.ndim != 3 or bgra.shape[2] != 4:
@@ -38,9 +38,10 @@ def alpha_over(bgr, bgra):
 
 
 def composite_patches(bgr, patches, default_margin=8):
-    """`patches` : liste de dicts {"image": ndarray BGR/gris, "corner":
-    "tl"|"tr"|"bl"|"br", "margin": int}. Renvoie une copie de `bgr` avec
-    les patches incrustes (ou `bgr` tel quel si `patches` est vide)."""
+    """Composite corner patches and return a copy of ``bgr``.
+
+    Each patch contains an image, a ``tl|tr|bl|br`` corner, and a margin.
+    """
     if bgr is None or not patches:
         return bgr
     out = bgr.copy()

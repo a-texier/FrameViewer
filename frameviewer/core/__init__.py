@@ -1,3 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Backend : pipeline image, sources, SIDECAR de calques, SPECIALIZED. Aucun import PySide6
-dans ce sous-package (testable sans Qt)."""
+"""Backend image pipeline, sources, and optional format adapters.
+
+This package deliberately has no PySide6 dependency and can be tested without
+Qt.
+"""

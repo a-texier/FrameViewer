@@ -26,6 +26,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from frameviewer.plugins.graph import REGISTRY, Graph, evaluate_graph_for_frame
 from frameviewer.plugins.graph_runtime import GRAPH_FILE
 from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX, PLUGIN_MODULE_FILE
+from frameviewer.ui.i18n import set_ui_text, ui_text
 
 NODE_W = 200
 ROW_H = 22
@@ -493,6 +494,8 @@ class GraphView(QtWidgets.QGraphicsView):
 
 
 class NodeGraphEditorWidget(QtWidgets.QWidget):
+    def _tr(self, text):
+        return ui_text(self, text)
     """Coeur de l'editeur -- reutilisable (fenetre autonome, dock...). Ne
     connait de MainWindow que ce dont il a besoin : self._mw.cur / .source /
     ._raw / ._display() / ._plugin_loader."""
@@ -664,7 +667,7 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         self.add_edge(seg.node_id, "forme", out.node_id, "forme")
         if not self._frame_col_combo.currentText().strip():
             self._frame_col_combo.setEditText("frame")
-        self._status.setText(
+        set_ui_text(self._status,
             "Exemple keypoints inséré. Vérifie la « Colonne frame », puis "
             "« Tester (frame courante) » ou « Enregistrer + recharger ».")
 
@@ -688,7 +691,7 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         cls = "".join(p.capitalize() for p in slug.split("_")) + "GraphPlugin"
         with open(os.path.join(self.folder, PLUGIN_MODULE_FILE), "w", encoding="utf-8") as f:
             f.write(_WRAPPER_TEMPLATE.format(cls=cls, name=slug))
-        self._status.setText("Enregistré.")
+        set_ui_text(self._status, "Enregistré.")
 
     def _save_and_reload(self):
         self._save()
@@ -697,11 +700,11 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
             self._mw._display()
         if callable(self._on_saved):
             self._on_saved()
-        self._status.setText("Enregistré + plugins rechargés.")
+        set_ui_text(self._status, "Enregistré + plugins rechargés.")
 
     def _browse_csv(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Choisir un CSV pour ce graphe", "", "CSV (*.csv)")
+            self, ui_text(self, "Choisir un CSV pour ce graphe"), "", "CSV (*.csv)")
         if not path:
             return
         self.graph.csv_path = path
@@ -742,8 +745,9 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
             if item.node_type.key == "csv_column":
                 item.set_column_options(header)
         origin = "" if self.graph.csv_path else " (aperçu du dossier)"
-        self._status.setText(f"Colonnes CSV : {os.path.basename(path)}{origin} "
-                             f"-- {len(header)} colonne(s) proposée(s).")
+        set_ui_text(self._status,
+            f"Colonnes CSV : {os.path.basename(path)}{origin} "
+            f"-- {len(header)} colonne(s) proposée(s).")
 
     def _test_current_frame(self):
         self._save()
@@ -799,7 +803,8 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         edge = EdgeItem(src_item.output_ports[src_port], dst_item.input_ports[dst_port])
         self.scene.addItem(edge)
         self.edge_items.append(edge)
-        self._status.setText(f"Relié : {src_id}.{src_port} -> {dst_id}.{dst_port}")
+        set_ui_text(
+            self._status, f"Relié : {src_id}.{src_port} -> {dst_id}.{dst_port}")
 
     def _on_node_moved(self, node_item):
         for e in self.edge_items:
@@ -860,7 +865,7 @@ class NodeGraphEditorWindow(QtWidgets.QWidget):
     l'application (on peut naviguer dans la sequence pendant l'edition)."""
 
     def __init__(self, mw, plugin_folder, on_saved=None):
-        super().__init__(None)
+        super().__init__(mw)
         self.setWindowFlag(QtCore.Qt.Window, True)
         self.setWindowTitle(f"Éditeur de graphe -- {os.path.basename(plugin_folder)}")
         self.resize(1040, 680)

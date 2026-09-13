@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Package applicatif FrameViewer. Voir docs/architecture.md pour la carte du
-code (frameviewer.core = backend, frameviewer.workers = taches de fond,
-frameviewer.ui = interface PySide6)."""
+"""FrameViewer application package.
+
+See ``docs/architecture.md`` for the code map: ``frameviewer.core`` contains
+the backend, ``frameviewer.workers`` the background tasks, and
+``frameviewer.ui`` the PySide6 interface.
+"""

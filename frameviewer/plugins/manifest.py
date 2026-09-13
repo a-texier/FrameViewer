@@ -1,18 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Manifest d'un plugin (modele v2) : decrit le contrat d'entree d'un plugin
--- son type (code/graphe), l'entree qui porte la frame courante, et la liste
-des entrees fichiers.
+"""Normalize the version-two plugin manifest and its input contract.
 
-Chaque entree est un NOM DE VARIABLE (identifiant Python, ex. "csv_plots").
-Le viewer fournit au plugin, avant chaque rendu, le chemin du fichier depose
-sous cette entree via un attribut du meme nom : self.<nom> = "<chemin>" (ou
-None). On ne transmet que le CHEMIN : le plugin ouvre et reconnait le format
-lui-meme (voir loader._bind_inputs et docs/plugins.md). Aucun type/format
-n'est donc declare ici.
+Each input name is a valid Python identifier. Before rendering, the loader
+assigns its selected path to an attribute with the same name. Only paths are
+passed; each plugin owns parsing and format validation.
 
-Un plugin peut ne PAS avoir de manifest.json : on infere alors un contrat par
-defaut (graphe si graph.json present, sinon code ; aucune entree fichier) --
-les plugins existants continuent de fonctionner sans modification.
+Packages without ``manifest.json`` receive a backward-compatible inferred
+contract based on their contents.
 """
 import json
 import os
@@ -21,7 +15,7 @@ MANIFEST_FILE = "manifest.json"
 
 
 def normalize(data, folder):
-    """Complete/valide un dict manifest brut avec des defauts surs."""
+    """Validate and complete a raw manifest with safe defaults."""
     data = data or {}
     kind = data.get("kind")
     if kind not in ("code", "graph"):
@@ -29,17 +23,15 @@ def normalize(data, folder):
     inputs = []
     seen = set()
     for it in data.get("inputs", []) or []:
-        # accepte l'entree sous forme de chaine ("csv_plots") ou de dict
-        # ({"name": "csv_plots"}) ; le champ "type" des anciens manifests est
-        # ignore (on ne transmet que le chemin, cf. docstring du module).
+        # Accept either a string or a mapping. Legacy type metadata is ignored
+        # because the contract transports paths only.
         name = (it if isinstance(it, str) else str(it.get("name", ""))).strip()
         if not name or name in seen:
             continue
         seen.add(name)
         inputs.append({"name": name})
-    # mapping touche clavier -> element On/Off (voir loader._sync_element_keymap) :
-    # {cle_element: caractere}. Auto-genere/synchronise depuis overlay_elements,
-    # editable par l'utilisateur. Omis si vide (plugins sans elements).
+    # Keyboard mapping for overlay-element toggles. It is synchronized from
+    # overlay_elements, remains user-editable, and is omitted when empty.
     elem_keys = {}
     raw_keys = data.get("element_keys")
     if isinstance(raw_keys, dict):
@@ -58,7 +50,7 @@ def normalize(data, folder):
 
 
 def load(folder):
-    """Manifest normalise du plugin (infere si manifest.json absent)."""
+    """Load and normalize a manifest, inferring it when absent."""
     path = os.path.join(folder, MANIFEST_FILE)
     data = {}
     if os.path.isfile(path):
@@ -76,8 +68,7 @@ def save(folder, manifest):
 
 
 def validate(manifest):
-    """-> (ok: bool, message: str). Contrat minimal : un nom, des entrees aux
-    noms uniques et non vides."""
+    """Validate the minimal contract and return ``(ok, message)``."""
     if not manifest.get("name"):
         return False, "manifest sans nom de plugin"
     names = [i.get("name") for i in manifest.get("inputs", [])]

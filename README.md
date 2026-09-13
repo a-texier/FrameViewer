@@ -5,10 +5,12 @@ videos and raw YUV streams. It provides synchronized multi-view navigation,
 contrast and LUT controls, annotations, regions of interest, frame extraction,
 conversion tools and a documented Python plugin API.
 
-![FrameViewer](logo_frameviewer.png)
+<p align="center">
+  <img src="logo_frameviewer.png" alt="FrameViewer" width="620">
+</p>
 
-![FrameViewer tutorial demo](IMG_GITHUB/FrameViewer_demo.gif)
-+
+![FrameViewer tutorial demo](gif_demo/FrameViewer_demo.gif)
+
 ## What FrameViewer does
 
 **FrameViewer is a visualization and rapid-review application.** Its primary
@@ -19,6 +21,11 @@ remain outside its core scope.
 The application is designed around **multimodal inspection**: RGB, infrared,
 thermal, grayscale, 8/16-bit imagery, videos, annotations and plugin-generated
 results can be reviewed independently or combined in synchronized views.
+
+The interface starts in French. Use the persistent `FR | ENG` control to
+switch every application-owned screen, dialog and tutorial step to English.
+Text and controls supplied by third-party or user plugins remain under the
+plugin author's control.
 
 | Area | Capabilities |
 | --- | --- |
@@ -112,3 +119,15 @@ python -m pip install -r requirements-dev.txt
 python run_all_tests.py
 python rebuild_standalone.py --check
 ```
+
+## License
+
+Original FrameViewer code is available under
+[`AGPL-3.0-only`](LICENSE). Network use of a modified version is covered by the
+AGPL source-availability requirements. Organizations that need proprietary
+terms can request a separate commercial license; see
+[`COMMERCIAL_LICENSE.md`](COMMERCIAL_LICENSE.md).
+
+Third-party software and tutorial data retain their own terms. See
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) and
+[`data_test/ATTRIBUTION.md`](data_test/ATTRIBUTION.md).

@@ -1,15 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Conversion entre calques `.ver` (Tracker, track-centrique) et dataset YOLO
-(Ultralytics, frame-centrique : un .txt par frame, coordonnees normalisees).
+"""Convert between tracked-box layers and frame-centric YOLO datasets.
 
-Ces deux formats ne modelisent pas la meme chose : un `.ver` suit un OBJET a
-travers les frames (track_id stable), alors qu'un dossier YOLO decrit les
-detections d'une FRAME sans aucune concept d'identite entre frames. La
-conversion YOLO -> .ver ne peut donc pas reconstruire de vrai suivi ; voir
-`yolo_to_ver_lines`.
+The layouts model different concepts: tracked rows preserve object identity
+across frames, while YOLO rows describe independent detections in one frame.
+Converting from YOLO therefore cannot reconstruct real temporal identity.
 
-Aucun import PySide6 ici -- reutilisable par le worker de conversion comme
-par un script CLI.
+This module has no PySide6 dependency and is reusable from workers or scripts.
 """
 import os
 import random
@@ -33,12 +29,10 @@ def class_names_from_annotations(annotations):
 
 
 def split_frame_ids(frame_ids, ratios=(1.0, 0.0, 0.0), seed=0):
-    """Repartit une liste de frame_ids en train/val/test.
+    """Split frame identifiers into train, validation, and test groups.
 
-    Le split se fait au niveau FRAME (toutes les boites d'une frame restent
-    ensemble) -- jamais au niveau boite, ce qui fuiterait des informations
-    d'une meme image entre lots. `ratios` = (train, val, test) ; n'a pas
-    besoin de sommer exactement a 1.0 (normalise automatiquement).
+    Splitting occurs at frame level so boxes from one image cannot leak across
+    groups. Ratios are normalized and need not sum to one.
     """
     ids = sorted(set(frame_ids))
     total_ratio = sum(ratios) or 1.0
@@ -60,22 +54,16 @@ def split_frame_ids(frame_ids, ratios=(1.0, 0.0, 0.0), seed=0):
 def export_yolo(annotations, frame_ids, img_w, img_h, out_dir,
                  class_names=None, ratios=(1.0, 0.0, 0.0), seed=0,
                  include_empty=True, frame_provider=None, progress_cb=None):
-    """Ecrit un dataset YOLO depuis des annotations deja chargees en memoire
-    (dict frame_idx -> [(cls, x1, y1, x2, y2, track_id, labels), ...], le
-    format renvoye par `annotation_loader.load_annotations`).
+    """Write a YOLO dataset from annotations already loaded in memory.
 
-    Structure produite (convention Ultralytics) :
+    Output layout:
         out_dir/labels/{train,val,test}/frame_NNNNNN.txt
-        out_dir/images/{train,val,test}/frame_NNNNNN.png   (si frame_provider)
+        out_dir/images/{train,val,test}/frame_NNNNNN.png   (with frame_provider)
         out_dir/data.yaml
 
-    `frame_provider(idx) -> ndarray BGR ou None` : fourni => exporte aussi
-    l'image de chaque frame (necessaire pour entrainer, pas seulement pour
-    archiver les labels). `include_empty` : ecrit aussi un .txt vide (frame
-    "negative"/fond, sans detection) -- convention standard YOLO.
-    `progress_cb(done, total)` : optionnel, appele apres chaque frame ecrite.
-
-    Retourne {"train": n, "val": n, "test": n} (nb de frames ecrites/lot).
+    A frame provider also exports images. ``include_empty`` writes empty label
+    files for negative samples. The optional progress callback runs after each
+    frame. Return the number of frames written per split.
     """
     class_names = list(class_names) if class_names else class_names_from_annotations(annotations)
     if img_w <= 0 or img_h <= 0:
@@ -138,15 +126,11 @@ def export_yolo(annotations, frame_ids, img_w, img_h, out_dir,
 
 
 def yolo_to_ver_lines(annotations, frame_ids=None, class_names=None):
-    """Convertit des annotations YOLO en lignes `.ver` (format long, tab-
-    separe, meme convention que LayerExportDialog._build_ver_lines).
+    """Convert YOLO annotations to long, tab-separated tracked-box rows.
 
-    ATTENTION -- limite fondamentale : YOLO ne fournit AUCUN identifiant
-    d'objet entre frames (chaque frame liste des detections independantes).
-    Le `track_id` ecrit ici est assigne par POSITION dans la frame (ordre des
-    lignes du .txt source), ce n'est PAS un vrai suivi temporel -- un objet
-    qui change de position dans l'ordre de detection d'une frame a l'autre
-    changera de track_id. A documenter/afficher clairement cote UI.
+    YOLO provides no cross-frame object identity. The generated track
+    identifier is the row position inside each frame and is not real temporal
+    tracking; an object may receive another identifier in the next frame.
     """
     class_names = list(class_names) if class_names else class_names_from_annotations(annotations)
     ids = sorted(frame_ids) if frame_ids is not None else sorted(annotations.keys())
@@ -164,9 +148,11 @@ def yolo_to_ver_lines(annotations, frame_ids=None, class_names=None):
 
 
 def yolo_to_ver(yolo_path, out_ver_path, img_w, img_h, class_names=None):
-    """Charge un dossier/.txt YOLO (`yolo_path`) et ecrit un `.ver` fusionne
-    (`out_ver_path`) -- une ligne par boite detectee, track_id positionnel
-    (voir `yolo_to_ver_lines`). Retourne (n_boites, n_frames)."""
+    """Convert a YOLO path to one merged tracked-box file.
+
+    Return ``(box_count, frame_count)``. See ``yolo_to_ver_lines`` for the
+    positional identifier limitation.
+    """
     annots = load_annotations(yolo_path, img_w, img_h)
     lines = yolo_to_ver_lines(annots, class_names=class_names)
     with open(out_ver_path, "w", encoding="utf-8") as f:

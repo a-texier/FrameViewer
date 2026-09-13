@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""FrameViewer — point d'entree.
+"""FrameViewer application entry point.
 
-Toute l'application vit dans le package `frameviewer/` (frameviewer.core =
-backend, frameviewer.workers = taches de fond, frameviewer.ui = interface
-PySide6). Voir docs/architecture.md pour la carte du code complete.
+The application lives in the ``frameviewer`` package. See
+``docs/architecture.md`` for the complete code map.
 """
 import sys
 

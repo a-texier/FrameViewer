@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Sources d'entree : abstraction commune "sequence de frames indexee"
-(voir docs/sources.md). Trois implementations concretes (video,
-sequence d'images, SPECIALIZED) + une source virtuelle (blend fusion)."""
+"""Indexed media-source abstractions used by the rendering pipeline.
+
+Concrete implementations cover video, image sequences, raw streams and
+optional formats. A virtual source renders two inputs as a blend.
+"""
 import os
 
 import cv2
@@ -12,7 +14,7 @@ from .feature_registry import operation_for_path
 from .pipeline import blend_frames, render_frame
 
 
-# formats YUV bruts supportes : id -> (libelle, octets par pixel)
+# Supported raw YUV layouts: identifier -> (display label, bytes per pixel).
 YUV_FORMATS = {
     "gray8":    ("Gris 8-bit (Y seul)",             1.0),
     "gray16le": ("Gris 16-bit little-endian (Y seul)", 2.0),
@@ -24,7 +26,7 @@ YUV_FORMATS = {
 
 
 def yuv_frame_bytes(width, height, fmt):
-    """Taille (octets) d'une frame brute, ou 0 si le format est inconnu."""
+    """Return the byte size of one raw frame, or zero for an unknown layout."""
     spec = YUV_FORMATS.get(fmt)
     if spec is None:
         return 0
@@ -32,9 +34,10 @@ def yuv_frame_bytes(width, height, fmt):
 
 
 def decode_yuv(data, width, height, fmt):
-    """Decode une frame YUV/gris brute -> ndarray BGR (formats YUV) ou 2D gris
-    (formats gray). `data` = bytes ou ndarray uint8. None si taille insuffisante
-    ou format inconnu (le pipeline gere ensuite 2D gris comme 3D BGR)."""
+    """Decode raw YUV or grayscale bytes into a BGR or 2D NumPy array.
+
+    Return ``None`` for insufficient data or an unknown layout.
+    """
     need = yuv_frame_bytes(width, height, fmt)
     if need <= 0:
         return None
@@ -70,11 +73,9 @@ class VideoSource:
         fps = self.cap.get(cv2.CAP_PROP_FPS)
         self._fps = float(fps) if fps and fps > 0 else 25.0
         self._next = 0
-        # certains conteneurs/codecs (flux web, VFR, GOP longs) n'ont pas d'index
-        # d'images fiable : CAP_PROP_POS_FRAMES + read() renvoie ok=False sur un
-        # seek arbitraire (scrub) alors que la lecture sequentielle marche. Une
-        # fois ce cas detecte, on bascule en decodage sequentiel (rembobinage +
-        # grab jusqu'a idx), seul acces fiable.
+        # Some containers and codecs do not expose a reliable frame index.
+        # Once random access fails, use sequential decoding with rewind as the
+        # reliable fallback.
         self._seek_unreliable = False
 
     @property
@@ -91,9 +92,7 @@ class VideoSource:
             self._count = idx + 1  # longueur inconnue: on l'apprend au fil de l'eau
 
     def _get_sequential(self, idx):
-        """Decode sequentiellement jusqu'a idx (index natif non fiable). En
-        avant depuis la position courante, avec rembobinage seulement si on
-        recule."""
+        """Decode sequentially to ``idx``, rewinding only when moving backward."""
         if idx < self._next:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             self._next = 0
@@ -113,21 +112,21 @@ class VideoSource:
             idx = 0
         if self._seek_unreliable:
             return self._get_sequential(idx)
-        # lecture sequentielle (cas rapide de la lecture normale).
+        # Fast path for ordinary sequential playback.
         if idx == self._next:
             ok, frame = self.cap.read()
             if ok:
                 self._learn_count(idx)
                 return frame
             return self._get_sequential(idx)
-        # acces aleatoire : on tente d'abord le seek natif.
+        # Try native random access first.
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         self._next = idx
         ok, frame = self.cap.read()
         if ok:
             self._learn_count(idx)
             return frame
-        # seek natif casse pour ce flux : on memorise et on decode en sequentiel.
+        # Remember that native seeking is broken for this stream.
         self._seek_unreliable = True
         return self._get_sequential(idx)
 
@@ -191,10 +190,11 @@ class ImageSequenceSource:
 
 
 class YuvSource:
-    """Sequence de fichiers YUV/gris BRUTS, un fichier = une frame. Le brut n'a
-    pas d'en-tete : la geometrie (largeur/hauteur) et le format sont fournis par
-    l'utilisateur (dialogue d'import) et memorises ici. Chaque frame est lue et
-    decodee a la demande (get), comme une sequence d'images."""
+    """Raw YUV/grayscale file sequence with one file per frame.
+
+    Raw media has no header, so the import dialog supplies geometry and layout.
+    Frames are read and decoded on demand.
+    """
     is_raw = False
 
     def __init__(self, paths, width, height, fmt, label="yuv",
@@ -243,7 +243,7 @@ class YuvSource:
 
 
 class SpecializedSource:
-    """Source SPECIALIZED (acces aleatoire). Frames natives (souvent uint16 IR)."""
+    """Random-access optional sequence source preserving native frame types."""
     is_raw = True
 
     def __init__(self, path):
@@ -285,9 +285,7 @@ class SpecializedSource:
 
 
 def describe_source(src):
-    """Description humaine du type de source (rappelée dans les popups
-    d'export « Extraire »/« Convertir » : vidéo / séquence / SPECIALIZED, résolution,
-    type de données, nb de frames, fps)."""
+    """Return a human-readable source description for export dialogs."""
     if src is None:
         return "Aucune source"
     if isinstance(src, SpecializedSource):
@@ -325,15 +323,17 @@ def describe_source(src):
 
 
 class FusionSource:
-    """Source virtuelle : blend alpha de deux sources rendues, frame par frame.
-    Sert à extraire (mp4/png/specialized) le résultat de la vue fusion comme une source
-    classique. Capture les sources et leurs fenêtres au moment de la création."""
+    """Virtual source that blends two rendered sources frame by frame.
+
+    It exposes the composition as a regular exportable source and captures the
+    source display windows when created.
+    """
 
     def __init__(self, src_a, rp_a, src_b, rp_b, lut_data, cube_lut, cube_size,
                  full_range, filters, alpha, mode="alpha"):
         self._a = src_a
         self._b = src_b
-        self._rpa = rp_a           # (lo, hi) de la vue A
+        self._rpa = rp_a           # Display window for source A.
         self._rpb = rp_b
         self._lut = lut_data
         self._cube = cube_lut

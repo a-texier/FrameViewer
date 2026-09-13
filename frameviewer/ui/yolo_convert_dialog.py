@@ -10,9 +10,13 @@ from PySide6.QtCore import Qt
 
 from frameviewer.core.annotation_convert import (class_names_from_annotations,
                                                  export_yolo, yolo_to_ver)
+from frameviewer.ui.i18n import set_ui_text, ui_text
 
 
 class YoloConvertDialog(QtWidgets.QDialog):
+
+    def _tr(self, text):
+        return ui_text(self, text)
 
     def __init__(self, mw):
         super().__init__(mw)
@@ -272,10 +276,13 @@ class YoloConvertDialog(QtWidgets.QDialog):
     def _upd_split_warn(self):
         total = self._sp_train.value() + self._sp_val.value() + self._sp_test.value()
         if total == 0:
-            self._split_warn.setText("Somme des 3 pourcentages = 0 -- rien ne serait exporté.")
+            set_ui_text(self._split_warn,
+                "Somme des 3 pourcentages = 0 -- rien ne serait exporté."
+            )
         elif total != 100:
-            self._split_warn.setText(
-                f"Somme = {total}% (≠ 100%) -- sera normalisée automatiquement.")
+            set_ui_text(self._split_warn,
+                f"Somme = {total}% (≠ 100%) -- sera normalisée automatiquement."
+            )
         else:
             self._split_warn.setText("")
 
@@ -285,24 +292,24 @@ class YoloConvertDialog(QtWidgets.QDialog):
 
     def _browse_out_dir(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Dossier de sortie du dataset YOLO...")
+            self, self._tr("Dossier de sortie du dataset YOLO..."))
         if d:
             self._out_dir_edit.setText(d)
 
     def _browse_yolo_src(self):
         d = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Dossier YOLO source (un .txt par frame)...")
+            self, self._tr("Dossier YOLO source (un .txt par frame)..."))
         if d:
             self._yolo_src_edit.setText(d)
             return
         p, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "...ou fichier .txt fusionné", "", "YOLO fusionné (*.txt)")
+            self, self._tr("...ou fichier .txt fusionné"), "", "YOLO fusionné (*.txt)")
         if p:
             self._yolo_src_edit.setText(p)
 
     def _browse_out_ver(self):
         p, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Enregistrer le .ver sous...", "import.ver", ".ver (*.ver)")
+            self, self._tr("Enregistrer le .ver sous..."), "import.ver", ".ver (*.ver)")
         if p:
             self._out_ver_edit.setText(p)
 
@@ -324,21 +331,24 @@ class YoloConvertDialog(QtWidgets.QDialog):
         paths = {L.get("path") for _, L in self._yolo_layers if L.get("path")}
         if len(paths) == 1:
             self._yolo_src_edit.setText(next(iter(paths)))
-            self._status.setText("Source pré-remplie depuis le calque YOLO chargé sur cette vue.")
+            set_ui_text(self._status,
+                "Source pré-remplie depuis le calque YOLO chargé sur cette vue."
+            )
         elif len(paths) > 1:
-            self._status.setText(
+            set_ui_text(self._status,
                 "Plusieurs calques YOLO d'origines différentes sont chargés -- "
                 "choisis le dossier/fichier voulu via Parcourir...")
         else:
-            self._status.setText(
-                "Chemin d'origine du calque YOLO introuvable -- choisis-le via Parcourir...")
+            set_ui_text(self._status,
+                "Chemin d'origine du calque YOLO introuvable -- choisis-le via Parcourir..."
+            )
 
     # ---------- actions ----------
     def _do_ver2yolo(self):
         mw = self._mw
         keys = self._checked_ver_keys()
         if not keys:
-            self._status.setText("Coche au moins un calque .ver à exporter.")
+            set_ui_text(self._status, "Coche au moins un calque .ver à exporter.")
             return
         raw_annots = getattr(mw, "_annotations", {}) or {}
         annots = {}
@@ -359,19 +369,21 @@ class YoloConvertDialog(QtWidgets.QDialog):
             if keep:
                 annots[fr] = keep
         if not annots:
-            self._status.setText("Aucune boîte dans les calques .ver cochés -- rien à exporter.")
+            set_ui_text(self._status,
+                "Aucune boîte dans les calques .ver cochés -- rien à exporter."
+            )
             return
         out_dir = self._out_dir_edit.text().strip()
         if not out_dir:
-            self._status.setText("Choisis un dossier de sortie.")
+            set_ui_text(self._status, "Choisis un dossier de sortie.")
             return
         if mw._raw is None:
-            self._status.setText("Aucune séquence ouverte sur cette vue.")
+            set_ui_text(self._status, "Aucune séquence ouverte sur cette vue.")
             return
         h, w = mw._raw.shape[:2]
         total = self._sp_train.value() + self._sp_val.value() + self._sp_test.value()
         if total <= 0:
-            self._status.setText("Le split ne peut pas être 0/0/0.")
+            set_ui_text(self._status, "Le split ne peut pas être 0/0/0.")
             return
         ratios = (self._sp_train.value() / total, self._sp_val.value() / total,
                   self._sp_test.value() / total)
@@ -391,31 +403,35 @@ class YoloConvertDialog(QtWidgets.QDialog):
                 include_empty=self._empty_chk.isChecked(),
                 frame_provider=frame_provider)
         except Exception as ex:
-            self._status.setText(f"Erreur export YOLO : {ex}")
+            set_ui_text(self._status, f"Erreur export YOLO : {ex}")
             return
-        self._status.setText(
+        set_ui_text(self._status,
             f"Dataset YOLO écrit → {out_dir}  "
             f"(train={counts['train']}, val={counts['val']}, test={counts['test']})")
 
     def _do_yolo2ver(self):
         src = self._yolo_src_edit.text().strip()
         if not src or not os.path.exists(src):
-            self._status.setText("Choisis un dossier ou fichier YOLO source valide.")
+            set_ui_text(self._status,
+                "Choisis un dossier ou fichier YOLO source valide."
+            )
             return
         out_path = self._out_ver_edit.text().strip()
         if not out_path:
-            self._status.setText("Choisis un chemin de sortie .ver.")
+            set_ui_text(self._status, "Choisis un chemin de sortie .ver.")
             return
         w, h = self._sp_w.value(), self._sp_h.value()
         try:
             n_boxes, n_frames = yolo_to_ver(
                 src, out_path, w, h, class_names=self._class_names())
         except Exception as ex:
-            self._status.setText(f"Erreur import YOLO : {ex}")
+            set_ui_text(self._status, f"Erreur import YOLO : {ex}")
             return
         if n_boxes == 0:
-            self._status.setText(
-                f"Aucune boîte trouvée dans {src} -- .ver non écrit (ou vide).")
+            set_ui_text(self._status,
+                f"Aucune boîte trouvée dans {src} -- .ver non écrit (ou vide)."
+            )
             return
-        self._status.setText(
-            f".ver écrit → {out_path}  ({n_boxes} boîte(s) sur {n_frames} frame(s))")
+        set_ui_text(self._status,
+            f".ver écrit → {out_path}  ({n_boxes} boîte(s) sur {n_frames} frame(s))"
+        )

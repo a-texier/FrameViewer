@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Decouverte/chargement des plugins depuis un dossier plugins/ voisin de
-l'executable (jamais dans sys._MEIPASS, qui est temporaire et nettoye a la
-fermeture). Un plugin = un sous-dossier plugins/plugins_<nom>/plugin.py
-exposant `PLUGIN = <classe FrameViewerPlugin>`.
+"""Discover and load adjacent or user-specific FrameViewer plugins.
 
-Aucun sandbox d'execution reel (hors de portee pour une appli desktop
-PyInstaller) : le code plugin tourne dans le process de l'app -- usage
-interne/de confiance, pas des plugins tiers non verifies. Chaque import et
-chaque appel de hook est protege individuellement : un plugin casse se
-desactive avec une erreur consultable (dialogue Plugins), il ne fait
-jamais planter l'app ni bloquer le rendu des autres calques/plugins."""
+Each package exposes ``PLUGIN = <FrameViewerPlugin subclass>`` from its
+``plugin.py`` module. Plugin code runs in the application process and must be
+trusted; this is not a security sandbox. Imports and hook calls are isolated
+individually so one failing plugin is disabled without stopping the app or
+other overlays.
+"""
 import contextlib
 import os
 import re
@@ -23,9 +20,9 @@ from frameviewer.plugins.api import PluginAPI
 PLUGIN_FOLDER_PREFIX = "plugins_"
 PLUGIN_MODULE_FILE = "plugin.py"
 
-# prefixe [xxx] en tete d'un message -> nom du plugin (logs systeme / prints).
+# A leading [tag] identifies the plugin in captured output.
 _TAG_RE = re.compile(r"^\s*\[([^\]]+)\]\s*")
-# mots qui trahissent une erreur -> niveau "error" par defaut.
+# Error-like words promote captured output to the error level.
 _ERR_RE = re.compile(r"ERREUR|EXCEPTION|Traceback|echec|échec|failed|Error", re.I)
 
 
@@ -44,10 +41,7 @@ def _indent(text, pad="    "):
 
 
 def _purge_sibling_modules(folder):
-    """Retire de sys.modules les modules helper deja charges depuis `folder`
-    (fichiers .py voisins de plugin.py). Assure qu'un `import mon_helper` dans
-    plugin.py reprend le code A JOUR a chaque rechargement, et que deux plugins
-    au meme nom de helper ne se marchent pas dessus."""
+    """Remove loaded sibling helpers so reloads always use current source."""
     base = os.path.abspath(folder) + os.sep
     try:
         local = {os.path.splitext(f)[0] for f in os.listdir(folder)
@@ -65,7 +59,7 @@ def _purge_sibling_modules(folder):
 
 
 def _describe_result(res):
-    """Resume court d'un resultat de hook pour le compte rendu de test."""
+    """Return a compact hook-result description for test reports."""
     import numpy as np
     if res is None:
         return "None (rien a dessiner)"
@@ -77,16 +71,13 @@ def _describe_result(res):
 
 
 class _StreamTee:
-    """Flux d'ecriture qui recopie vers un flux d'origine (s'il existe) et emet
-    chaque ligne complete vers un journal. Rend visibles les print() des plugins
-    dans la console plugins, y compris dans le build fenetre ou sys.stdout vaut
-    None (un simple print() y leverait sinon une exception)."""
+    """Tee complete output lines to the plugin log and an optional stream."""
 
     def __init__(self, prefix, tag, sink, original):
         self._prefix = prefix
         self._tag = tag
         self._sink = sink            # callable(str)
-        self._original = original    # flux d'origine ou None
+        self._original = original    # Original stream or None.
         self._buf = ""
 
     def write(self, s):
@@ -119,10 +110,7 @@ class _StreamTee:
 
 
 def environment_report(modules=("numpy", "cv2", "pandas", "polars", "PySide6")):
-    """Diagnostic 'ou tourne reellement le code' : executable, mode frozen, et
-    surtout d'ou chaque module est CHARGE. Piege classique : numpy vient du
-    bundle de l'exe tandis que pandas vient d'un env externe -> versions
-    incompatibles. Sert au bouton Diagnostic et a PluginAPI.env_report()."""
+    """Report the executable, frozen state, and actual module locations."""
     import importlib
     lines = []
     lines.append(f"Python       : {sys.version.split()[0]}")
@@ -154,9 +142,7 @@ def environment_report(modules=("numpy", "cv2", "pandas", "polars", "PySide6")):
 
 
 def _alpha_stack(base, top):
-    """Compose deux overlays BGRA (top au-dessus de base) -> BGRA. Utilise
-    pour empiler les overlays de plusieurs plugins avant de les poser sur
-    l'image. Tolerant aux tailles differentes (recadre au plus petit)."""
+    """Alpha-stack two BGRA overlays, clipping to common dimensions."""
     import numpy as np
     h = min(base.shape[0], top.shape[0])
     w = min(base.shape[1], top.shape[1])
@@ -176,10 +162,7 @@ def _alpha_stack(base, top):
 
 
 def plugins_root():
-    """Dossier plugins/ livre avec l'appli : a cote de l'exe si frozen
-    (PyInstaller onefile), a cote de la racine du depot en mode source --
-    meme comportement, testable sans rebuild. C'est aussi ou sont crees les
-    nouveaux plugins."""
+    """Return the application plugin directory in source or frozen mode."""
     if getattr(sys, "frozen", False):
         base = os.path.dirname(sys.executable)
     else:
@@ -188,9 +171,7 @@ def plugins_root():
 
 
 def user_config_dir():
-    """Dossier de config PROPRE A CHAQUE UTILISATEUR / PC (jamais en dur) :
-    %APPDATA%\\FrameViewer sous Windows, equivalents standards ailleurs. Cree
-    a la premiere utilisation ; contient settings.ini + un dossier plugins/."""
+    """Return and create the platform-standard per-user configuration path."""
     if sys.platform.startswith("win"):
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
     elif sys.platform == "darwin":
@@ -206,8 +187,7 @@ def user_config_dir():
 
 
 def user_plugins_dir():
-    """Dossier plugins/ PERSONNEL de l'utilisateur (dans user_config_dir),
-    scanne EN PLUS de celui livre avec l'appli. Cree a la demande."""
+    """Return and create the per-user plugin directory."""
     d = os.path.join(user_config_dir(), "plugins")
     try:
         os.makedirs(d, exist_ok=True)
@@ -217,9 +197,7 @@ def user_plugins_dir():
 
 
 def plugins_roots():
-    """Tous les dossiers ou chercher des plugins, dans l'ordre de priorite :
-    d'abord ceux livres avec l'appli (a cote de l'exe), puis ceux perso de
-    l'utilisateur (AppData). Un plugin_id vu deux fois : le premier gagne."""
+    """Return plugin search roots in priority order; first duplicate wins."""
     return [plugins_root(), user_plugins_dir()]
 
 
@@ -230,9 +208,9 @@ class LoadedPlugin:
         self.instance = None
         self.enabled = False
         self.error = None
-        self.manifest = _manifest.load(folder)   # contrat d'entree (v2)
-        self.last_run = None                       # heure derniere execution
-        self.element_keys = {}                      # {cle_element: touche}, cf. sync
+        self.manifest = _manifest.load(folder)   # Version-two input contract.
+        self.last_run = None                     # Last execution time.
+        self.element_keys = {}                   # Overlay element key bindings.
 
     @property
     def kind(self):
@@ -244,29 +222,17 @@ class LoadedPlugin:
 
 
 class PluginLoader:
-    """Vit sur MainWindow (self._plugin_loader) -- etat GLOBAL, pas par
-    vue : les plugins s'appliquent a la vue active/primaire (voir
-    docs/plugins.md, limite documentee). Un seul point d'etat evite le
-    piege connu de ce depot ou main_window.py et multiview.py finissent
-    par diverger sur la meme logique."""
+    """Own plugin discovery, execution, state, and error isolation."""
 
     def __init__(self, mw):
         self._mw = mw
         self.plugins = []          # [LoadedPlugin, ...]
         self._log_records = []     # [{ts,pid,level,lineno,src,text}, ...]
-        # ids des plugins ACTIFS -- source de verite conservee a travers les
-        # rechargements (reload_all re-decouvre tout et remettrait sinon
-        # chaque plugin a "desactive"). Vide au demarrage : les plugins sont
-        # decoches par defaut (voir docs/plugins.md), l'utilisateur les active
-        # depuis Parametres > Plugins ; MainWindow restaure l'etat memorise
-        # via set_enabled_ids() avant discover_and_load().
+        # Enabled identifiers survive reloads and are restored before discovery.
         self._enabled_ids = set()
 
     def log(self, msg, level="info", pid=None, lineno=None, src=None):
-        """Journalise un message. `level` : info|ok|warn|error (colore la
-        Console). `pid`/`lineno`/`src` sont remplis par PluginAPI.log ; pour un
-        message brut, on devine le plugin d'un prefixe [xxx] et le niveau erreur
-        de mots-cles."""
+        """Append a structured log record and infer missing metadata."""
         text = str(msg)
         if pid is None:
             m = _TAG_RE.match(text)
@@ -277,12 +243,12 @@ class PluginLoader:
             level = "error"
         self._log_records.append({"ts": _now_hms(), "pid": pid, "level": level,
                                   "lineno": lineno, "src": src, "text": text})
-        # borne le journal pour ne pas grossir indefiniment en session longue.
+        # Bound memory use during long sessions.
         if len(self._log_records) > 5000:
             del self._log_records[: len(self._log_records) - 5000]
 
     def log_lines(self):
-        """Journal en texte brut : 'HH:MM:SS  [plugin]  [Lnn]  - message'."""
+        """Return plain-text log lines with timestamps and source locations."""
         out = []
         for r in self._log_records:
             tag = f"[{r['pid']}] " if r.get("pid") else ""
@@ -295,7 +261,7 @@ class PluginLoader:
         return out
 
     def log_records(self):
-        """Journal structure (pour la Console coloree)."""
+        """Return structured records for the colored console."""
         return list(self._log_records)
 
     def clear_log(self):
@@ -303,10 +269,7 @@ class PluginLoader:
 
     @contextlib.contextmanager
     def _capture(self, prefix):
-        """Redirige stdout/stderr vers le journal le temps d'un appel de plugin,
-        pour que print() et tracebacks soient visibles dans la console plugins
-        (essentiel dans le build fenetre ou sys.stdout vaut None). stderr ->
-        niveau error."""
+        """Capture a plugin call's stdout and stderr into the plugin log."""
         out = _StreamTee(prefix, "", lambda s: self.log(s, level="info"), sys.stdout)
         err = _StreamTee(prefix, "", lambda s: self.log(s, level="error"), sys.stderr)
         old_o, old_e = sys.stdout, sys.stderr
@@ -320,7 +283,7 @@ class PluginLoader:
 
     def discover_and_load(self):
         self.plugins = []
-        seen = set()   # plugin_id deja charges (le 1er dossier gagne)
+        seen = set()   # Loaded identifiers; the first search root wins.
         for root in plugins_roots():
             if not os.path.isdir(root):
                 continue
@@ -349,19 +312,12 @@ class PluginLoader:
             mod_name = f"frameviewer_plugin_{lp.plugin_id}"
             module = types.ModuleType(mod_name)
             module.__file__ = mod_path
-            # Compilation EN MEMOIRE, jamais via le cache bytecode __pycache__ :
-            # exec_module() reutilise le .pyc tant que mtime+taille du source
-            # n'ont pas change ; or un enregistrement suivi d'un rechargement
-            # dans la meme seconde (granularite mtime) rechargeait l'ancien
-            # bytecode -> "Actualiser" n'appliquait le changement qu'une fois
-            # sur deux. compile() lit toujours le source a jour.
+            # Compile directly from source. Timestamp-granularity issues in the
+            # bytecode cache otherwise make rapid save/reload cycles stale.
             code = compile(src, mod_path, "exec")
             api = PluginAPI(self._mw, lp.folder, lp.plugin_id)
-            # Permet `import mon_helper` depuis plugin.py (fichier .py voisin) :
-            # on met le dossier du plugin en tete de sys.path le temps du
-            # chargement, apres avoir purge d'eventuels helpers deja charges
-            # (sinon un reload garderait leur ancien code -- meme piege que le
-            # .pyc). Nomme tes helpers de facon unique (ex. demo_utils.py).
+            # Temporarily prepend the package directory so plugin.py can import
+            # sibling helpers, after purging stale sibling modules.
             _purge_sibling_modules(lp.folder)
             sys.path.insert(0, lp.folder)
             try:
@@ -370,7 +326,7 @@ class PluginLoader:
                     cls = module.__dict__.get("PLUGIN")
                     if cls is None:
                         raise ImportError(f"{mod_path} : pas d'attribut PLUGIN = <classe>")
-                    instance = cls()      # certains plugins importent une lib externe ici
+                    instance = cls()      # Some plugins import dependencies here.
                     instance.on_load(api)
             finally:
                 try:
@@ -379,8 +335,7 @@ class PluginLoader:
                     pass
             lp.instance = instance
             self._sync_element_keymap(lp, api)
-            # decoche par defaut : n'est actif que si l'utilisateur l'a active
-            # (etat memorise dans self._enabled_ids).
+            # A plugin is active only when its identifier was explicitly enabled.
             lp.enabled = lp.plugin_id in self._enabled_ids
             lp.error = None
             self.log(f"[{lp.plugin_id}] charge.")
@@ -407,13 +362,11 @@ class PluginLoader:
                 lp.enabled = bool(enabled)
 
     def enabled_ids(self):
-        """Ids des plugins actuellement actifs -- a persister (QSettings)."""
+        """Return enabled plugin identifiers for persistence."""
         return sorted(self._enabled_ids)
 
     def set_enabled_ids(self, ids):
-        """Restaure l'etat actif memorise. A appeler AVANT discover_and_load()
-        (au demarrage) pour que les plugins reviennent dans l'etat ou ils
-        etaient a la fermeture."""
+        """Restore enabled identifiers before discovery at startup."""
         self._enabled_ids = set(ids or [])
 
     def enabled_plugins(self):
@@ -435,9 +388,7 @@ class PluginLoader:
             return default
 
     def run_plugin_test(self, plugin_id, frame_idx, size):
-        """Execute a la demande les hooks de rendu du plugin sur la frame
-        courante (meme s'il est desactive), en capturant sortie et exceptions.
-        Test rapide depuis la console plugins ; ne modifie pas l'etat actif."""
+        """Run rendering hooks on demand without changing enabled state."""
         from frameviewer.plugins.api import FrameViewerPlugin, PluginAPI
         lp = next((l for l in self.plugins if l.plugin_id == plugin_id), None)
         if lp is None:
@@ -458,7 +409,7 @@ class PluginLoader:
         ran = False
         for name, args in hooks:
             if getattr(cls, name) is getattr(FrameViewerPlugin, name):
-                continue   # hook non surcharge
+                continue   # Hook not overridden.
             ran = True
             t0 = _perf()
             try:
@@ -473,7 +424,7 @@ class PluginLoader:
                        "get_overlays / render_overlay / render_panel)")
         return "\n".join(out)
 
-    # --- hooks agreges, appeles par MainWindow (vue active/primaire) ---
+    # Aggregated hooks called by MainWindow for the active/primary view.
     def collect_overlays(self, frame_idx):
         out = []
         for lp in self.enabled_plugins():
@@ -484,19 +435,16 @@ class PluginLoader:
         return out
 
     def collect_multiview_overlays(self, views_context):
-        """Formes inter-vues des plugins actifs (hook get_multiview_overlays),
-        appele une fois par rafraichissement avec le contexte multivue. Meme
-        robustesse que collect_overlays (chaque plugin isole par _safe_call)."""
+        """Collect cross-view shapes from active plugins with isolated calls."""
         from frameviewer.plugins.api import FrameViewerPlugin
         out = []
-        # cles de TOUTES les vues affichees (pour retrouver un fichier depose sur
-        # n'importe laquelle) : un plugin multivue "connecte les deux", donc son
-        # entree ne doit pas dependre de quelle vue est active.
+        # Merge keys from every visible view so multi-view inputs do not depend
+        # on which view is active.
         view_keys = [v.get("view_key") for v in (views_context or {}).get("views", [])]
         for lp in self.enabled_plugins():
             if type(lp.instance).get_multiview_overlays is \
                     FrameViewerPlugin.get_multiview_overlays:
-                continue   # hook non surcharge -> rien a faire
+                continue   # Hook not overridden.
             merged = self._merged_contract(lp, view_keys)
             self._bind_inputs(lp, merged)
             api = PluginAPI(self._mw, lp.folder, lp.plugin_id, contract=merged)
@@ -507,9 +455,7 @@ class PluginLoader:
         return out
 
     def _merged_contract(self, lp, view_keys):
-        """Fusionne les fichiers d'entree du plugin sur TOUTES les vues donnees
-        (+ la vue active) : {nom_entree: 1er chemin non vide trouve}. Ainsi un
-        CSV depose sur la vue gauche OU droite alimente le hook multivue."""
+        """Merge plugin input paths across all supplied and active views."""
         merged = {}
         keys = [None] + [k for k in view_keys if k and k != "__none__"]
         for vk in keys:
@@ -537,24 +483,19 @@ class PluginLoader:
         return self._safe_call(lp, "build_panel", api, default=None)
 
     def collect_menu_actions(self, lp):
-        """-> [(libelle, callback), ...] du hook menu_actions du plugin `lp`,
-        ou []. Chaque callback sera protege par _safe_call a l'appel."""
+        """Return menu actions declared by one plugin."""
         api = PluginAPI(self._mw, lp.folder, lp.plugin_id)
         return self._safe_call(lp, "menu_actions", api, default=[]) or []
 
     def _sync_element_keymap(self, lp, api):
-        """Synchronise manifest['element_keys'] avec overlay_elements() : ajoute
-        les nouvelles cles (defaut 'm'), retire les disparues, CONSERVE les choix
-        existants de l'utilisateur. N'ecrit manifest.json que si l'ensemble des
-        cles a change (donc pas a chaque lancement). Resultat sur lp.element_keys
-        = {cle_element: touche}."""
+        """Synchronize manifest key bindings with declared overlay elements."""
         from frameviewer.plugins.api import FrameViewerPlugin
         lp.element_keys = {}
         inst = lp.instance
         if inst is None or type(inst).overlay_elements is FrameViewerPlugin.overlay_elements:
             return
-        # appel DIRECT (pas _safe_call) : la sync tourne au chargement, avant que
-        # le plugin soit active, et _safe_call renvoie [] pour un plugin inactif.
+        # Call directly during loading because inactive plugins are skipped by
+        # the normal safe-call path.
         try:
             elems = inst.overlay_elements(api) or []
         except Exception as e:
@@ -583,14 +524,9 @@ class PluginLoader:
             except OSError as e:
                 self.log(f"[{lp.plugin_id}] manifest non ecrit ({e})", level="warn")
 
-    # --- modele "overlay code" (render_overlay/render_panel + souris) ---
+    # Code-overlay model: rendering and pointer hooks.
     def _bind_inputs(self, lp, contract):
-        """Injecte les chemins du contrat courant sur l'instance du plugin :
-        pour chaque entree declaree <nom>, self.<nom> = chemin_du_fichier (ou
-        None si non renseignee). C'est le SEUL "magique" du modele -- il rend
-        les entrees disponibles en clair dans le code du plugin (self.csv_plots
-        etc.), pour que le plugin ouvre lui-meme le fichier. Appele avant chaque
-        hook, pour chaque contrat visible."""
+        """Bind current contract paths to same-named plugin attributes."""
         if lp.instance is None:
             return
         for inp in lp.manifest.get("inputs", []) or []:
@@ -602,19 +538,14 @@ class PluginLoader:
                     pass
 
     def _visible_contracts(self, lp, view_key=None):
-        """Liste des contrats VISIBLES du plugin (chacun = {nom_entree:
-        chemin}) pour la vue `view_key` (None = vue courante). Delegue a
-        MainWindow ; repli sur un contrat vide si l'etat n'est pas construit."""
+        """Return visible input contracts for a view, or an empty contract."""
         fn = getattr(self._mw, "_visible_contracts", None)
         if fn is None:
             return [{}]
         return fn(lp.plugin_id, view_key) or []
 
     def collect_overlay_image(self, frame_idx, size, view_key=None):
-        """Compose (alpha) les overlays BGRA des plugins actifs qui surchargent
-        render_overlay, UNE FOIS PAR CONTRAT VISIBLE, pour la vue `view_key`
-        (None = vue courante ; une cle explicite -> une vue satellite, chacune
-        avec SES fichiers et SES cases). Renvoie un BGRA (H,W,4) ou None."""
+        """Alpha-compose active plugin overlays for each visible contract."""
         from frameviewer.plugins.api import FrameViewerPlugin
         w, h = int(size[0]), int(size[1])
         if w <= 0 or h <= 0:
@@ -623,10 +554,8 @@ class PluginLoader:
         for lp in self.enabled_plugins():
             if type(lp.instance).render_overlay is FrameViewerPlugin.render_overlay:
                 continue
-            # `or [{}]` : si aucune entree n'est deposee, on appelle quand meme
-            # render_overlay une fois avec un contrat vide (self.<entree> = None),
-            # comme le fait deja render_panel. Un plugin qui exige un fichier
-            # renvoie None de lui-meme ; un plugin a fallback (demo) peut dessiner.
+            # Invoke once with an empty contract when no input exists. Plugins
+            # can return None or provide an intentional fallback.
             for contract in (self._visible_contracts(lp, view_key) or [{}]):
                 self._bind_inputs(lp, contract)
                 api = PluginAPI(self._mw, lp.folder, lp.plugin_id, contract=contract, view_key=view_key)
@@ -639,8 +568,7 @@ class PluginLoader:
         return acc
 
     def render_plugin_panel(self, plugin_id, frame_idx, size):
-        """Image (BGR/BGRA) de la ZONE plugin pour le plugin `plugin_id`
-        (1er contrat visible), ou None. Voir hook render_panel."""
+        """Render the plugin-panel image for the first visible contract."""
         from frameviewer.plugins.api import FrameViewerPlugin
         lp = next((l for l in self.enabled_plugins() if l.plugin_id == plugin_id), None)
         if lp is None or type(lp.instance).render_panel is FrameViewerPlugin.render_panel:
@@ -654,7 +582,7 @@ class PluginLoader:
         from frameviewer.plugins.api import FrameViewerPlugin
         for lp in self.enabled_plugins():
             if type(lp.instance).on_view_hover is FrameViewerPlugin.on_view_hover:
-                continue   # plugin sans hover -> pas d'appel a chaque survol
+                continue   # Avoid calls when hover is not implemented.
             contracts = self._visible_contracts(lp) or [{}]
             self._bind_inputs(lp, contracts[0])
             api = PluginAPI(self._mw, lp.folder, lp.plugin_id, contract=contracts[0])
@@ -671,9 +599,7 @@ class PluginLoader:
             self._safe_call(lp, "on_view_click", api, frame_idx, x, y)
 
     def dispatch_key(self, frame_idx, key, text):
-        """Transmet une touche (que l'appli n'a pas consommee) aux plugins qui
-        surchargent on_view_key. Renvoie True des qu'un plugin renvoie True
-        (touche traitee) -> l'appelant peut alors ne pas la propager."""
+        """Dispatch an unconsumed key and report whether a plugin handled it."""
         from frameviewer.plugins.api import FrameViewerPlugin
         handled = False
         for lp in self.enabled_plugins():
@@ -687,13 +613,7 @@ class PluginLoader:
         return handled
 
     def dispatch_drop(self, path):
-        """Propose `path` (fichier/dossier glisse-depose, non reconnu par
-        l'app -- pas un .sidecar/.ver/YOLO/media) a chaque plugin actif via
-        accepts_drop, dans l'ordre de decouverte ; le premier qui accepte
-        recoit on_drop et le chemin est considere traite. Renvoie True si
-        un plugin a pris en charge `path`, False sinon (l'appelant peut
-        alors retomber sur le comportement habituel / signaler que le
-        fichier n'est pas reconnu)."""
+        """Offer an unrecognized dropped path to active plugins in load order."""
         accepting = []
         for lp in self.enabled_plugins():
             api = PluginAPI(self._mw, lp.folder, lp.plugin_id)

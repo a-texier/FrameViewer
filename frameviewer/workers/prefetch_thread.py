@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Precharge N frames en avance depuis une source image/SPECIALIZED (tache de fond,
-reduit les saccades en lecture reseau SSH)."""
+"""Prefetch upcoming frames to reduce latency for remote media sources."""
 import cv2
 from PySide6 import QtCore
 
 class _PrefetchThread(QtCore.QThread):
-    """Thread de fond : charge N frames en avance depuis une source image/SPECIALIZED."""
-    # Signal(dict) sous PySide6 6.8 peut convertir silencieusement le payload
-    # Python en dictionnaire vide lors du passage inter-thread. Signal(object)
-    # conserve les ndarray du cache et leurs indices sans marshaling Qt.
+    """Load selected frames into a cache from a background thread."""
+    # PySide6 6.8 may silently turn Signal(dict) into an empty mapping across
+    # threads. Signal(object) preserves NumPy arrays and their indices.
     done = QtCore.Signal(object)
 
     def __init__(self, source, indices, scale):

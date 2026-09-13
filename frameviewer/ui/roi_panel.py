@@ -4,6 +4,8 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
+from frameviewer.ui.i18n import set_ui_pair, set_ui_text, ui_text
+
 class MiniHist(QtWidgets.QWidget):
     """Petit histogramme (sans poignees) pour la zone selectionnee, avec
     axes : X = niveau de gris (min..max du crop), Y = nombre de pixels."""
@@ -67,6 +69,9 @@ class RoiPanel(QtWidgets.QWidget):
     """Zoom du crop + mini histogramme + statistiques de la selection."""
     convertRequested = QtCore.Signal()   # bouton "Convertir" (export ROI sur la séquence)
 
+    def _tr(self, text):
+        return ui_text(self, text)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._raw_pm = None  # pixmap brut; rescale dans resizeEvent
@@ -112,11 +117,12 @@ class RoiPanel(QtWidgets.QWidget):
     def clear(self):
         self._raw_pm = None
         self.crop_label.setPixmap(QtGui.QPixmap())
-        self.crop_label.setText("(pas de selection)")
+        set_ui_text(self.crop_label, "(pas de selection)")
         self.mini.counts = None
         self.mini.update()
-        self.stats.setText("Active l'outil 'Selection / ROI' puis\n"
-                           "trace un rectangle sur l'image.")
+        set_ui_text(
+            self.stats,
+            "Active l'outil 'Selection / ROI' puis\ntrace un rectangle sur l'image.")
 
     def _rescale_crop(self):
         if self._raw_pm is None:
@@ -152,14 +158,21 @@ class RoiPanel(QtWidgets.QWidget):
         self.mini.set_data(inten_crop)
         g = np.asarray(inten_crop, dtype=np.float64).ravel()
         if g.size:
-            self.stats.setText(
+            french = (
                 f"{w} x {h} px   surface {w*h} px²\n"
                 f"min {g.min():.1f}    max {g.max():.1f}\n"
                 f"moyenne {g.mean():.2f}    σ {g.std():.2f}\n"
-                f"mediane {np.median(g):.1f}")
+                f"mediane {np.median(g):.1f}"
+            )
+            english = (
+                f"{w} x {h} px   area {w*h} px²\n"
+                f"min {g.min():.1f}    max {g.max():.1f}\n"
+                f"mean {g.mean():.2f}    σ {g.std():.2f}\n"
+                f"median {np.median(g):.1f}"
+            )
+            set_ui_pair(self.stats, french, english)
         else:
-            self.stats.setText("Selection vide.")
+            set_ui_text(self.stats, "Selection vide.")
 
 
 # ------------------------------ affichage ---------------------------------
-

@@ -45,6 +45,9 @@ from frameviewer.ui.export_dialogs import (ClipExtractDialog, ConvertDialog,
                                            RoiConvertDialog, SplitExtractDialog)
 from frameviewer.ui.history_list import HistoryList, _HistRow
 from frameviewer.ui.histogram import HistogramLUT
+from frameviewer.ui.i18n import (LANGUAGE_SETTING, LocalizedStatusBar,
+                                 UiTranslationController, normalize_language,
+                                 set_ui_text, set_ui_tooltip, translate_text)
 from frameviewer.ui.layer_export_dialog import LayerExportDialog
 from frameviewer.ui.link_views_dialog import LinkViewsDialog
 from frameviewer.ui.yolo_convert_dialog import YoloConvertDialog
@@ -335,6 +338,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_base_frame = 0
         self._syncing = False
         self._wired_videos = set()
+        self._ui_language = normalize_language(
+            self._plugin_settings().value(LANGUAGE_SETTING, "fr")
+        )
         self._build_toolbar()
         self._build_docks()
         self.view.roiChanged.connect(self.on_roi)
@@ -385,8 +391,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._central_lay = lay
         self.setCentralWidget(central)
 
-        self.status = self.statusBar()
-        self.status.showMessage("Pret. Glisse un fichier/dossier/specialized/sidecar, ou utilise Ouvrir...")
+        self.status = LocalizedStatusBar(self)
+        self.setStatusBar(self.status)
+        self.status.showMessage("Pret. Glisse un fichier ou dossier, ou utilise Ouvrir...")
 
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._on_tick)
@@ -437,6 +444,8 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QApplication.instance().installEventFilter(self)
         from frameviewer.ui.tutorial import FrameViewerTutorial
         self._tutorial = FrameViewerTutorial(self)
+        self._i18n = UiTranslationController(self, self._ui_language)
+        self._refresh_language_buttons()
         QtCore.QTimer.singleShot(
             0, lambda: self.resizeDocks(
                 [self.tools_dock, self.right_dock], [260, 360], Qt.Horizontal))
@@ -445,12 +454,75 @@ class MainWindow(QtWidgets.QMainWindow):
     def _start_tutorial(self):
         self._tutorial.start()
 
+    def _tr(self, text: str) -> str:
+        """Return one catalog entry for the currently selected UI language."""
+        return translate_text(text, self._ui_language)
+
+    def _set_ui_language(self, language: str) -> None:
+        language = normalize_language(language)
+        if language == self._ui_language:
+            return
+        self._ui_language = language
+        settings = self._plugin_settings()
+        settings.setValue(LANGUAGE_SETTING, language)
+        settings.sync()
+        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            translator = getattr(self, "_i18n", None)
+            if translator is not None:
+                translator.set_language(language)
+            status = getattr(self, "status", None)
+            if isinstance(status, LocalizedStatusBar):
+                status.retranslate()
+            self._refresh_language_buttons()
+            tutorial = getattr(self, "_tutorial", None)
+            if tutorial is not None and tutorial.index >= 0:
+                tutorial._poll()
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _refresh_language_buttons(self) -> None:
+        for language, button in getattr(self, "_language_buttons", {}).items():
+            blocked = button.blockSignals(True)
+            button.setChecked(language == self._ui_language)
+            button.blockSignals(blocked)
+
     def _build_toolbar(self):
         tb = QtWidgets.QToolBar("Outils")
         tb.setObjectName("main_toolbar")
         tb.setMovable(False)
         tb.setFloatable(False)
         self.addToolBar(Qt.TopToolBarArea, tb)
+
+        language_widget = QtWidgets.QWidget()
+        language_widget.setObjectName("language_selector")
+        language_layout = QtWidgets.QHBoxLayout(language_widget)
+        language_layout.setContentsMargins(0, 0, 6, 0)
+        language_layout.setSpacing(0)
+        self._language_buttons = {}
+        language_group = QtWidgets.QButtonGroup(language_widget)
+        language_group.setExclusive(True)
+        for language, label in (("fr", "FR"), ("en", "ENG")):
+            button = QtWidgets.QToolButton(language_widget)
+            button.setObjectName(f"language_{language}_button")
+            button.setText(label)
+            button.setCheckable(True)
+            button.setToolTip(
+                "Interface en français" if language == "fr" else "English interface"
+            )
+            button.setStyleSheet(
+                "QToolButton{padding:3px 6px;border:1px solid #555;}"
+                "QToolButton#language_fr_button{border-radius:3px 0 0 3px;}"
+                "QToolButton#language_en_button{border-radius:0 3px 3px 0;}"
+                "QToolButton:checked{background:#2d4f70;border-color:#5aafff;color:white;}"
+            )
+            button.clicked.connect(
+                lambda _checked=False, value=language: self._set_ui_language(value)
+            )
+            language_group.addButton(button)
+            language_layout.addWidget(button)
+            self._language_buttons[language] = button
+        tb.addWidget(language_widget)
 
         self.tutorial_btn = self._btn("Tutoriel", self._start_tutorial)
         self.tutorial_btn.setObjectName("tutorial_button")
@@ -1000,8 +1072,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._central_lay.setSpacing(10 if multi else 6)
             if multi:
                 self.convert_btn.setMenu(None)
-                self.convert_btn.setText("🎬 Convertir (toutes les vues)")
-                self.convert_btn.setToolTip(
+                set_ui_text(self.convert_btn, "🎬 Convertir (toutes les vues)")
+                set_ui_tooltip(
+                    self.convert_btn,
                     "Assemble un MP4 de la composition multi-vues actuelle\n"
                     "(disposition, calques et contraste inclus).")
                 self.convert_btn.setVisible(True)
@@ -1295,7 +1368,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.rec_btn.blockSignals(True)
             self.rec_btn.setChecked(_rec_on)
             self.rec_btn.blockSignals(False)
-            self.rec_btn.setText("REC clics  [ON]" if _rec_on else "REC clics")
+            set_ui_text(self.rec_btn, "REC clics  [ON]" if _rec_on else "REC clics")
         if hasattr(self, "crosshair_chk"):
             self.crosshair_chk.blockSignals(True)
             self.crosshair_chk.setChecked(False)
@@ -2454,7 +2527,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.vid_rec_btn.blockSignals(False)
                 return
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Enregistrer la lecture vidéo...",
+                self, self._tr("Enregistrer la lecture vidéo..."),
                 "capture.mp4", "Video MP4 (*.mp4)")
             if not path:
                 self.vid_rec_btn.blockSignals(True)
@@ -2480,7 +2553,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.vid_rec_btn.blockSignals(False)
                 return
             self._vid_rec_path = path
-            self.vid_rec_btn.setText("⏹ Stop")
+            set_ui_text(self.vid_rec_btn, "⏹ Stop")
             self.status.showMessage(f"Enregistrement → {path}", 0)
         else:
             self._stop_vid_rec()
@@ -2496,7 +2569,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.vid_rec_btn.blockSignals(True)
             self.vid_rec_btn.setChecked(False)
             self.vid_rec_btn.blockSignals(False)
-            self.vid_rec_btn.setText("⏺ Vidéo")
+            set_ui_text(self.vid_rec_btn, "⏺ Vidéo")
 
     def _capture_frame(self):
         if self._raw is None:
@@ -2526,7 +2599,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if x2 > x and y2 > y:
                 data = data[y:y2, x:x2]
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Enregistrer la capture...", default, filt)
+            self, self._tr("Enregistrer la capture..."), default, filt)
         if not path:
             return
         ok = cv2.imwrite(path, data)
@@ -2646,8 +2719,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _show_aide(self):
         import html as _html
 
+        tr = lambda text: translate_text(text, self._ui_language)
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("Aide — FrameViewer")
+        dlg.setWindowTitle(tr("Aide — FrameViewer"))
         dlg.setStyleSheet("QDialog{background:#101013;}")
 
         browser = QtWidgets.QTextBrowser()
@@ -2658,6 +2732,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         def sec(title, color, rows, icon=""):
             """Un bloc titre coloré + tableau raccourci/description."""
+            title = tr(title)
             head = (f'<div style="margin:14px 0 6px 0;padding:4px 10px;'
                      f'border-left:4px solid {color};background:{color}22;'
                      f'border-radius:3px;">'
@@ -2665,6 +2740,7 @@ class MainWindow(QtWidgets.QMainWindow):
                      f'{icon} {title}</span></div>')
             body = ('<table cellspacing="0" cellpadding="3" width="100%">')
             for k, v in rows:
+                k, v = tr(k), tr(v)
                 body += (f'<tr><td style="color:{color};font-family:Consolas,monospace;'
                          f'white-space:nowrap;padding-right:14px;vertical-align:top;">'
                          f'<b>{k}</b></td>'
@@ -2676,14 +2752,13 @@ class MainWindow(QtWidgets.QMainWindow):
         optional_media = sorted(SEQUENCE_FORMAT_EXTS)
         media_text = ", ".join(native_media)
         if optional_media:
-            media_text += "; formats optionnels actifs : " + ", ".join(optional_media)
+            media_text += tr("; formats optionnels actifs : ") + ", ".join(optional_media)
         media_text = _html.escape(media_text)
 
-        html = """
+        html = f"""
         <div style="color:#e8e8ee; font-family:Segoe UI, Arial, sans-serif; font-size:12px;">
-        <h2 style="color:#5aafff; margin-bottom:2px;">FrameViewer — Aide complète</h2>
-        <p style="color:#9a9aa5;">Souris, clavier, outils, calques, multivue et export —
-        tout ce que fait l'application.</p>
+        <h2 style="color:#5aafff; margin-bottom:2px;">{tr("FrameViewer — Aide complète")}</h2>
+        <p style="color:#9a9aa5;">{tr("Souris, clavier, outils, calques, multivue et export — tout ce que fait l'application.")}</p>
         """
 
         html += sec("Souris — vue / canvas", "#5aafff", [
@@ -2708,8 +2783,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         html += sec("Outils TI (panneau accordéon)", "#7fd858", [
             ("ROI — sélection / mesures", "Zoom du crop + histogramme + statistiques (min/max/moyenne/σ/"
-                "médiane). Bouton <b>Convertir…</b> : exporte le crop (fixe ou suivi .ver) sur toute la "
-                "séquence en MP4/PNG/SPECIALIZED, avec padding réglable et heatmap d'histogrammes en option."),
+                "médiane). Bouton <b>Convertir…</b> : exporte le crop fixe ou suivi sur toute la "
+                "séquence dans les formats actifs, avec padding réglable et heatmap d'histogrammes en option."),
             ("FFT 2D", "Spectre de Fourier 2D (magnitude, log) de la ROI courante — texture/périodicité."),
             ("Profil de ligne", "Trace le profil d'intensité le long d'une ligne ; export CSV."),
             ("Règle", "Distance et angle entre points cliqués (polyligne)."),
@@ -2759,24 +2834,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 "démonstration, la classe 0 se nomme <b>vehicle</b>."),
         ], "▣")
 
-        html += """
+        html += f"""
         <div style="margin:8px 0;color:#dddde3;">
-        <b style="color:#ff9a3d;">Dossier YOLO</b>
+        <b style="color:#ff9a3d;">{tr("Dossier YOLO")}</b>
         <pre style="background:#0d0d11;border:1px solid #33333c;padding:8px;">
 images/frame_05000.png
 labels/frame_05000.txt
 
 # class_id cx_norm cy_norm width_norm height_norm
 0 0.201748 0.609994 0.123153 0.160014</pre>
-        <b style="color:#ff9a3d;">YOLO fusionné, frames 0-based</b>
+        <b style="color:#ff9a3d;">{tr("YOLO fusionné, frames 0-based")}</b>
         <pre style="background:#0d0d11;border:1px solid #33333c;padding:8px;">
 # frame_index class_id cx_norm cy_norm width_norm height_norm
 0 0 0.201748 0.609994 0.123153 0.160014</pre>
-        <b style="color:#ff9a3d;">.ver court, frames 1-based</b>
+        <b style="color:#ff9a3d;">{tr(".ver court, frames 1-based")}</b>
         <pre style="background:#0d0d11;border:1px solid #33333c;padding:8px;">
 # frame visibility x1 y1 x2 y2
 1 1 100 80 180 150</pre>
-        <b style="color:#ff9a3d;">.ver long</b>
+        <b style="color:#ff9a3d;">{tr(".ver long")}</b>
         <pre style="background:#0d0d11;border:1px solid #33333c;padding:8px;">
 # frame visibility x1 y1 x2 y2 track_id class subclass...
 1 1 100 80 180 150 42 vehicle moving</pre>
@@ -2784,7 +2859,7 @@ labels/frame_05000.txt
         """
 
         html += sec("Export / Conversion", "#ff6b6b", [
-            ("Extraire… (IN → OUT)", "Formats MP4 (cv2/ffmpeg), dossier PNG, dossier TIFF, SPECIALIZED. Case "
+            ("Extraire… (IN → OUT)", "Formats vidéo, dossiers d'images et formats optionnels actifs. Case "
                 "« tel qu'affiché » : grave calques + contraste dans l'export."),
             ("Convertir (bouton par vue / barre du bas)", "Même export, sur toute la séquence de cette source."),
             ("📷 Capture", "Capture la frame courante en PNG (avec ou sans calques, au choix)."),
@@ -3321,7 +3396,7 @@ labels/frame_05000.txt
                 if L["kind"] == "sidecar":
                     self.overlays = {}
                     self.view.set_overlays([])
-                    self.sidecar_label.setText("Aucun SIDECAR charge")
+                    set_ui_text(self.sidecar_label, "Aucun SIDECAR charge")
                 else:
                     tid = L["key"]
                     for fr in list(self._annotations):
@@ -3940,7 +4015,7 @@ labels/frame_05000.txt
         import shutil
         from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX, plugins_root
         src = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Choisir le dossier du plugin à importer")
+            self, self._tr("Choisir le dossier du plugin à importer"))
         if not src:
             return
         if not os.path.isfile(os.path.join(src, "plugin.py")):
@@ -4434,13 +4509,14 @@ labels/frame_05000.txt
         filters.insert(0, f"Medias ({' '.join(media_patterns)})")
         filters.extend(("YUV brut (*.yuv)", "Tous les fichiers (*)"))
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Ouvrir un media", "",
+            self, self._tr("Ouvrir un media"), "",
             ";;".join(filters))
         if path:
             self.open_paths([path])
 
     def open_dir_dialog(self):
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Ouvrir un dossier d'images")
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, self._tr("Ouvrir un dossier d'images"))
         if not folder:
             return
         if list_files(folder, {".yuv"}):     # dossier de .yuv bruts -> sequence YUV
@@ -4475,7 +4551,7 @@ labels/frame_05000.txt
         self.view.reset_view()
         self._roi = None
         self.tools_panel.roi_panel.clear()
-        self.sidecar_label.setText("Aucun SIDECAR charge")
+        set_ui_text(self.sidecar_label, "Aucun SIDECAR charge")
         self.sidecar_logs.clear()
 
         self.fps_spin.blockSignals(True)
@@ -4916,7 +4992,7 @@ labels/frame_05000.txt
         self._fps_est = 0.0
         self._fps_tick_n = 0
         self.timer.start(max(1, int(round(1000.0 / fps))))
-        self.play_btn.setText("Pause")
+        set_ui_text(self.play_btn, "Pause")
         if hasattr(self, "_primary_frame"):
             self._primary_frame.mini.set_playing(True)
         if self._audio_player is not None and self.son_btn.isChecked():
@@ -4927,7 +5003,7 @@ labels/frame_05000.txt
 
     def stop(self):
         self.timer.stop()
-        self.play_btn.setText("Lecture")
+        set_ui_text(self.play_btn, "Lecture")
         self._last_tick_t = 0.0
         self.fps_label.setText("")
         if hasattr(self, "_primary_frame"):
@@ -5105,7 +5181,7 @@ labels/frame_05000.txt
     def on_cube_toggle(self):
         if self.cube_btn.isChecked():
             path, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Charger un LUT .cube", "", "LUT 3D (*.cube)")
+                self, self._tr("Charger un LUT .cube"), "", "LUT 3D (*.cube)")
             if not path:
                 self.cube_btn.setChecked(False)
                 return
@@ -5223,7 +5299,7 @@ labels/frame_05000.txt
                 "Aucune source sur la vue principale.")
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Exporter la composition multi-vues...",
+            self, self._tr("Exporter la composition multi-vues..."),
             "multiview.mp4", "Vidéo MP4 (*.mp4)")
         if not path:
             return
@@ -5285,8 +5361,9 @@ labels/frame_05000.txt
         # bouton « ⇄ Convertir » de la vue elle-même (bandeau, en haut).
         self.convert_btn.setVisible(False)
         short = (name[:18] + "…") if len(name) > 19 else name
-        self.convert_btn.setText(f"Convertir : {short}")
-        self.convert_btn.setToolTip(
+        set_ui_text(self.convert_btn, f"Convertir : {short}")
+        set_ui_tooltip(
+            self.convert_btn,
             f"Convertit la vue sélectionnée « {name} » vers un autre format")
 
     def _start_convert(self, mode):
@@ -5470,7 +5547,7 @@ labels/frame_05000.txt
         if not self.clicks_path:
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Enregistrer les clics sous...", self.clicks_path, "Texte (*.txt)")
+            self, self._tr("Enregistrer les clics sous..."), self.clicks_path, "Texte (*.txt)")
         if path:
             self.clicks_path = path
             self._rewrite_file()

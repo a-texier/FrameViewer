@@ -9,6 +9,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from frameviewer.tutorial_data import is_tutorial_source, stage_tutorial_data
+from frameviewer.ui.i18n import ui_text
 
 
 @dataclass(frozen=True)
@@ -185,19 +186,20 @@ class TutorialBubble(QtWidgets.QFrame):
         self.next.clicked.connect(self.nextRequested)
 
     def set_step(self, step: TutorialStep, index: int, total: int, ready: bool) -> None:
-        self.chapter.setText(f"{index + 1}/{total}  {step.chapter}")
-        self.title.setText(step.title)
-        self.body.setText(step.body() if callable(step.body) else step.body)
+        tr = lambda text: ui_text(self, text)
+        self.chapter.setText(f"{index + 1}/{total}  {tr(step.chapter)}")
+        self.title.setText(tr(step.title))
+        self.body.setText(tr(step.body() if callable(step.body) else step.body))
         if step.progress is not None:
-            lines = [f"[{'x' if done else ' '}] {label}" for label, done in step.progress()]
-            self.waiting.setText("A faire :\n" + "\n".join(lines))
+            lines = [f"[{'x' if done else ' '}] {tr(label)}" for label, done in step.progress()]
+            self.waiting.setText(tr("A faire :") + "\n" + "\n".join(lines))
             self.waiting.setVisible(True)
         else:
-            self.waiting.setText("" if ready else "A faire : " + step.ready_text)
+            self.waiting.setText("" if ready else tr("A faire : " + step.ready_text))
             self.waiting.setVisible(not ready)
         self.previous.setEnabled(index > 0)
         self.next.setEnabled(ready)
-        self.next.setText("Terminer  ✓" if index == total - 1 else "Suivant  →")
+        self.next.setText(tr("Terminer") + "  ✓" if index == total - 1 else tr("Suivant") + "  →")
         self.adjustSize()
 
 

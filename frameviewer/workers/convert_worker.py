@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Conversion d'une source (SPECIALIZED/video/images) vers un autre format, en tache
-de fond (QThread) pour garder l'UI reactive sur des fichiers de plusieurs Go."""
+"""Convert large media sources in a QThread so the UI remains responsive."""
 import os
 
 import cv2
@@ -16,11 +15,13 @@ SpecializedWriter = operation_for_kind("sequence_format", "writer")
 type_img_for_dtype = operation_for_kind("sequence_format", "type_for_dtype")
 
 class ConvertWorker(QtCore.QThread):
-    """Convertit une source (SPECIALIZED / video / dossier d'images) vers un autre format :
-    dossier PNG 8 bits (rendu), dossier PNG 16 bits (brut), video MP4, ou SPECIALIZED.
-    La source est rouverte DANS le thread pour ne pas partager de handle avec l'UI."""
-    progress = QtCore.Signal(int, int)        # (courant, total)
-    finished_ok = QtCore.Signal(str, int)     # (sortie, nb_ecrits)
+    """Convert a source to rendered PNG, raw PNG, MP4, or an optional format.
+
+    The source is reopened inside the worker to avoid sharing handles with the
+    UI thread.
+    """
+    progress = QtCore.Signal(int, int)        # (current, total)
+    finished_ok = QtCore.Signal(str, int)     # (output, written count)
     failed = QtCore.Signal(str)
 
     def __init__(self, src_kind, src_arg, out_path, mode, lo, hi, lut_data,
@@ -28,7 +29,7 @@ class ConvertWorker(QtCore.QThread):
                  filters=None, fps=25.0, parent=None):
         super().__init__(parent)
         self.src_kind = src_kind    # "specialized" | "video" | "images"
-        self.src_arg = src_arg      # chemin (specialized/video) ou liste de chemins (images)
+        self.src_arg = src_arg      # One media path or a list of image paths.
         self.out_path = out_path
         self.mode = mode            # "png8" | "png16" | "mp4" | "specialized"
         self.lo, self.hi = lo, hi
@@ -83,7 +84,7 @@ class ConvertWorker(QtCore.QThread):
                     if inten.ndim == 3 and inten.shape[2] == 1:
                         inten = inten[:, :, 0]
                     if not np.issubdtype(inten.dtype, np.integer):
-                        inten = np.clip(inten, 0, 255).astype(np.uint8)  # video/images -> 8 bits
+                        inten = np.clip(inten, 0, 255).astype(np.uint8)  # Media to 8-bit.
                     if specialized_w is None:
                         rows, cols = inten.shape[:2]
                         specialized_w = SpecializedWriter(self.out_path, rows, cols,
@@ -148,4 +149,3 @@ class ConvertWorker(QtCore.QThread):
             self.failed.emit(f"Conversion interrompue ({written} images ecrites).")
         else:
             self.finished_ok.emit(self.out_path, written)
-

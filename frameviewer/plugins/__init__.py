@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Systeme de plugins FrameViewer -- voir docs/plugins.md.
+"""FrameViewer plugin framework; see ``docs/plugins.md``.
 
-Ce sous-package (api.py, loader.py) ne depend que de frameviewer.ui pour la
-facade PluginAPI ; les plugins eux-memes vivent HORS du depot, dans un
-dossier plugins/ voisin de l'executable (jamais bake dans l'exe)."""
+The API and loader bridge the application UI. Plugin packages remain external
+to the executable in an adjacent or user-specific ``plugins`` directory.
+"""

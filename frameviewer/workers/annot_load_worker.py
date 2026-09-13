@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Charge un dossier d'annotations (YOLO -- potentiellement des milliers de
-petits .txt, un par frame) en tache de fond. Lire ca directement dans le
-thread GUI est ce qui gelait l'interface au drop d'un gros dossier -- un
-seul fichier .ver/.txt fusionne reste charge de facon synchrone (cf.
-MainWindow._load_dropped_annotations), une seule lecture sequentielle n'a
-pas besoin de tache de fond."""
+"""Load a potentially large folder of per-frame annotations in the background.
+
+Directory loading used to block the GUI because it may require thousands of
+small reads. A single merged annotation file remains synchronous because it
+only requires one sequential read.
+"""
 from PySide6 import QtCore
 
 from frameviewer.core.annotation_loader import load_annotations
 
 
 class AnnotFolderLoadWorker(QtCore.QThread):
-    # Signal(object), PAS Signal(dict) : le marshaling inter-thread de
-    # Signal(dict) sous PySide6 6.8 corrompt silencieusement le contenu (le
-    # slot recoit {} alors que run() a bien construit un dict complet,
-    # verifie empiriquement) -- Signal(object) transporte le Python object
-    # sans essayer de le convertir.
-    done = QtCore.Signal(object)   # dict : frame_id -> [(cls,x1,y1,x2,y2,track_id,labels), ...]
+    # PySide6 6.8 may silently marshal Signal(dict) as an empty mapping across
+    # threads. Signal(object) preserves the original Python object.
+    done = QtCore.Signal(object)   # frame_id -> annotation rows
     failed = QtCore.Signal(str)
 
     def __init__(self, path, img_w, img_h, default_track=0):
