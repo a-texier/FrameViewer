@@ -552,8 +552,8 @@ class PluginCard(QtWidgets.QFrame):
     def _refresh_border(self, selected):
         c = "#4a90d9" if selected else "#3a3a44"
         w = 2 if selected else 1
-        self.setStyleSheet(f"#PluginCard{{border:{w}px solid {c}; border-radius:6px; "
-                           "background:rgba(255,255,255,5);}}")
+        self.setStyleSheet(f"border:{w}px solid {c}; border-radius:6px; "
+                           "background-color:#202126;")
 
     # ---- interactions ----
     def mousePressEvent(self, e):

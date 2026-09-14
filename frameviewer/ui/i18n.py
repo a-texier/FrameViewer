@@ -1312,10 +1312,9 @@ class UiTranslationController(QtCore.QObject):
         self._property_text(widget, "tooltip", widget.toolTip, widget.setToolTip)
         self._property_text(widget, "status", widget.statusTip, widget.setStatusTip)
         self._property_text(widget, "whats_this", widget.whatsThis, widget.setWhatsThis)
-        if widget.isWindow():
-            self._property_text(
-                widget, "window_title", widget.windowTitle, widget.setWindowTitle
-            )
+        self._property_text(
+            widget, "window_title", widget.windowTitle, widget.setWindowTitle
+        )
         if isinstance(widget, QtWidgets.QLabel):
             self._property_text(widget, "text", widget.text, widget.setText)
         elif isinstance(widget, QtWidgets.QAbstractButton):
@@ -1343,10 +1342,9 @@ class UiTranslationController(QtCore.QObject):
         self._property_text(widget, "tooltip", widget.toolTip, widget.setToolTip)
         self._property_text(widget, "status", widget.statusTip, widget.setStatusTip)
         self._property_text(widget, "whats_this", widget.whatsThis, widget.setWhatsThis)
-        if widget.isWindow():
-            self._property_text(
-                widget, "window_title", widget.windowTitle, widget.setWindowTitle
-            )
+        self._property_text(
+            widget, "window_title", widget.windowTitle, widget.setWindowTitle
+        )
         if isinstance(widget, QtWidgets.QLabel):
             self._property_text(widget, "text", widget.text, widget.setText)
         elif isinstance(widget, QtWidgets.QAbstractButton):

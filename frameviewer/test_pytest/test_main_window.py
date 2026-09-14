@@ -40,6 +40,8 @@ def test_language_toggle_is_ordered_persistent_and_reversible(qapp):
     qapp.processEvents()
     assert window.tools_btn.text() == "Image tools"
     assert window.right_tab.tabText(0) == "Histogram / Layers"
+    assert toolbar.windowTitle() == "Tools"
+    assert window.tools_dock.windowTitle() == "Image tools"
     assert window._plugin_settings().value(LANGUAGE_SETTING) == "en"
 
     plugin_owned = QtWidgets.QWidget(window)
@@ -52,6 +54,8 @@ def test_language_toggle_is_ordered_persistent_and_reversible(qapp):
     qapp.processEvents()
     assert window.tools_btn.text() == "Outils TI"
     assert window.right_tab.tabText(0) == "Hist / Calque"
+    assert toolbar.windowTitle() == "Outils"
+    assert window.tools_dock.windowTitle() == "Outils TI"
     window.close()
 
 
