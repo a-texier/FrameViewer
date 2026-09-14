@@ -432,10 +432,10 @@ class InputDropZone(QtWidgets.QFrame):
                                "background:rgba(90,140,200,0.06);}")
 
     def _hint(self, on):
-        # surbrillance bleue pendant un glisser : "zone accessible au drop".
+        # surbrillance verte pendant un glisser : "zone valide pour le drop".
         if on:
-            self.setStyleSheet("InputDropZone{border:2px solid #5aafff; "
-                               "background:rgba(90,175,255,0.20);}")
+            self.setStyleSheet("InputDropZone{border:2px solid #5cd98a; "
+                               "background:rgba(90,220,140,0.22);}")
         else:
             self._apply(getattr(self, "_path", "") or "")
 
@@ -502,14 +502,13 @@ class PluginCard(QtWidgets.QFrame):
         head.addWidget(self._arrow)
         name = _ElidedPluginName(self.lp.name)
         f = name.font(); f.setBold(True); name.setFont(f)
-        head.addWidget(name)
+        head.addWidget(name, 1)
         status = "Actif" if self.lp.enabled else ("Erreur" if self.lp.instance is None else "Inactif")
         col = "#3a3" if self.lp.enabled else ("#c55" if self.lp.instance is None else "#777")
         self._badge = QtWidgets.QLabel(status)
         self._badge.setStyleSheet(f"background:{col}; color:white; border-radius:3px; "
                                   "padding:1px 8px; font-size:10px;")
         head.addWidget(self._badge)
-        head.addStretch(1)
         self._chk = QtWidgets.QCheckBox("Actif")
         self._chk.setObjectName(f"plugin_active_{self.pid}")
         self._chk.setChecked(self.lp.enabled)
@@ -550,10 +549,14 @@ class PluginCard(QtWidgets.QFrame):
         self._refresh_border(False)
 
     def _refresh_border(self, selected):
+        # Selecteur #PluginCard : la bordure doit entourer UNIQUEMENT cette
+        # carte, jamais se propager aux widgets enfants (zones de depot,
+        # boutons...). Sans selecteur, Qt applique la regle en cascade a
+        # toute la descendance -> tout se retrouve entoure de bleu.
         c = "#4a90d9" if selected else "#3a3a44"
         w = 2 if selected else 1
-        self.setStyleSheet(f"border:{w}px solid {c}; border-radius:6px; "
-                           "background-color:#202126;")
+        self.setStyleSheet(f"#PluginCard{{border:{w}px solid {c}; border-radius:6px; "
+                           "background-color:#202126;}}")
 
     # ---- interactions ----
     def mousePressEvent(self, e):
@@ -624,9 +627,11 @@ class PluginCard(QtWidgets.QFrame):
             b.clicked.connect(lambda _=False, fn=cb: self._run_action(fn))
             lay.addWidget(b)
         if has_panel:
-            b = QtWidgets.QPushButton("Ouvrir le panneau (dock)")
+            b = QtWidgets.QPushButton()
             b.setObjectName(f"plugin_open_dock_{self.pid}")
-            b.clicked.connect(self._open_dock_panel)
+            b.clicked.connect(self._toggle_dock_panel)
+            self._dock_btn = b
+            self._update_dock_button_text()
             lay.addWidget(b)
 
     def _run_action(self, fn):
@@ -637,17 +642,21 @@ class PluginCard(QtWidgets.QFrame):
             self._mw._plugin_loader.log(f"action plugin : {e}", level="error",
                                         pid=self.pid)
 
-    def _open_dock_panel(self):
-        # un seul dock par plugin : s'il existe deja (meme masque), on le
-        # re-affiche au lieu d'en empiler un nouveau a chaque clic.
+    def _toggle_dock_panel(self):
+        # un seul dock par plugin : s'il existe deja, on bascule montre/cache
+        # au lieu d'en empiler un nouveau a chaque clic sur le bouton.
         docks = getattr(self._mw, "_plugin_docks", None)
         if docks is None:
             docks = self._mw._plugin_docks = {}
         existing = docks.get(self.pid)
         if existing is not None:
             try:
-                existing.show()
-                existing.raise_()
+                if existing.isVisible():
+                    existing.hide()
+                else:
+                    existing.show()
+                    existing.raise_()
+                self._update_dock_button_text()
                 return
             except RuntimeError:
                 docks.pop(self.pid, None)   # dock detruit -> on recree
@@ -657,9 +666,33 @@ class PluginCard(QtWidgets.QFrame):
             dock = getattr(self._mw, "_plugin_last_dock", None)
             if dock is not None and dock is not before:
                 docks[self.pid] = dock
+                # le bouton doit refleter aussi une fermeture via la croix du
+                # dock lui-meme, pas seulement un clic sur ce bouton.
+                dock.visibilityChanged.connect(
+                    lambda _visible: self._update_dock_button_text())
         except Exception as e:
             self._mw._plugin_loader.log(f"build_panel : {e}", level="error",
                                         pid=self.pid)
+        self._update_dock_button_text()
+
+    def _update_dock_button_text(self):
+        btn = getattr(self, "_dock_btn", None)
+        if btn is None:
+            return
+        docks = getattr(self._mw, "_plugin_docks", None) or {}
+        dock = docks.get(self.pid)
+        visible = False
+        if dock is not None:
+            try:
+                visible = dock.isVisible()
+            except RuntimeError:
+                visible = False
+        try:
+            set_ui_text(
+                btn,
+                "Fermer le panneau (dock)" if visible else "Ouvrir le panneau (dock)")
+        except RuntimeError:
+            pass
 
     def _build_groups(self):
         _clear_layout(self._groups_box)
@@ -848,14 +881,17 @@ _SEG_SS = (
 
 
 class _ElidedPluginName(QtWidgets.QLabel):
-    """Nom borne : la carte reste stable et le nom complet reste accessible."""
+    """Nom borne : elide dynamiquement selon la place restante plutot qu'une
+    largeur fixe, pour que les boutons de fin de ligne (dossier, supprimer)
+    ne soient jamais pousses hors du panneau quand celui-ci est etroit."""
 
-    WIDTH = 150
+    MIN_WIDTH = 30
 
     def __init__(self, text, parent=None):
         super().__init__(parent)
         self._full_text = str(text)
-        self.setFixedWidth(self.WIDTH)
+        self.setMinimumWidth(self.MIN_WIDTH)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         self.setToolTip(self._full_text)
         self.setTextInteractionFlags(Qt.NoTextInteraction)
         self._update_text()
@@ -864,6 +900,10 @@ class _ElidedPluginName(QtWidgets.QLabel):
         available = max(0, self.width() - 2)
         self.setText(self.fontMetrics().elidedText(
             self._full_text, Qt.ElideRight, available))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_text()
 
     def changeEvent(self, event):
         super().changeEvent(event)

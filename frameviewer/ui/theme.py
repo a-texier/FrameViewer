@@ -903,7 +903,7 @@ QGroupBox::title { subcontrol-origin: margin; left:8px; padding:0 4px; color:#aa
 QSlider::groove:horizontal { height:6px; background:#3a3a42; border-radius:3px; }
 QSlider::handle:horizontal { width:14px; background:#5a86e0; border-radius:7px; margin:-5px 0; }
 QSlider::sub-page:horizontal { background:#3f6dd0; border-radius:3px; }
-QDockWidget { titlebar-close-icon: none; }
+QDockWidget::close-button, QDockWidget::float-button { background:transparent; border:none; padding:1px; }
 QDockWidget::title { background:#27272b; padding:4px; }
 QStatusBar { color:#aab; }
 QLabel { color:#ccd; }

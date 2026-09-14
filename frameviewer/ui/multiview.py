@@ -221,7 +221,7 @@ class BaseViewFrame(QtWidgets.QFrame):
             self._frozen_label = label or "Past Frame"
             self.banner.setText(f" {self._frozen_label}")
             self.banner.setStyleSheet(
-                "background:#bfe8c8; color:#000; font-weight:bold; "
+                "background:#1f4a2a; color:#eafff0; font-weight:bold; "
                 "font-size:10px; padding:1px 4px;")
         else:
             self._frozen_label = None

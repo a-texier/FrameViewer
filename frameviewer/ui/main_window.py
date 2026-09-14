@@ -665,7 +665,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # ===== panneau droit unifie (QTabWidget) =====
         self.right_dock = QtWidgets.QDockWidget("Panneaux", self)
         self.right_dock.setObjectName("right_panels_dock")
-        self.right_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self.right_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        icons.restyle_dock_titlebar_buttons(self.right_dock)
 
         _TAB_SS = (
             "QTabBar::tab{min-width:90px;padding:6px 14px;"
@@ -860,7 +861,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_hist_dock(self):
         self.hist_dock = QtWidgets.QDockWidget("Historique des sources", self)
-        self.hist_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self.hist_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        icons.restyle_dock_titlebar_buttons(self.hist_dock)
         hw = QtWidgets.QWidget()
         hv = QtWidgets.QVBoxLayout(hw)
         hv.setContentsMargins(4, 4, 4, 4)
@@ -887,8 +889,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_tools_dock(self):
         self.tools_dock = QtWidgets.QDockWidget("Outils TI", self)
         self.tools_dock.setObjectName("tools_dock")
-        self.tools_dock.setAllowedAreas(
-            Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.tools_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        icons.restyle_dock_titlebar_buttons(self.tools_dock)
         self.tools_panel = ToolsPanel()
         _tools_scroll = QtWidgets.QScrollArea()
         _tools_scroll.setWidget(self.tools_panel)

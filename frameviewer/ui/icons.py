@@ -223,6 +223,11 @@ def _plus(p):
     p.drawLine(3.5, 9, 14.5, 9)
 
 
+def _close(p):
+    p.drawLine(4.5, 4.5, 13.5, 13.5)
+    p.drawLine(13.5, 4.5, 4.5, 13.5)
+
+
 _DRAW = {
     "camera": _camera,
     "speaker": _speaker,
@@ -252,6 +257,7 @@ _DRAW = {
     "bracket_out": _bracket_out,
     "reticle": _reticle,
     "plus": _plus,
+    "close": _close,
 }
 
 
@@ -277,3 +283,20 @@ def pixmap(name, size=18, color=_DEFAULT_COLOR, width=1.4):
 
 def icon(name, size=18, color=_DEFAULT_COLOR, width=1.4):
     return QtGui.QIcon(pixmap(name, size, color, width))
+
+
+def restyle_dock_titlebar_buttons(dock):
+    """Recolore les boutons natifs (fermer/detacher) de la barre de titre
+    d'un QDockWidget. Le style Qt les dessine avec l'icone standard de l'OS,
+    qui ne tient pas compte de la palette sombre de l'appli et rend souvent
+    une croix gris fonce a peine visible sur fond sombre. Qt nomme ces
+    boutons internes de facon stable depuis Qt5 (qt_dockwidget_closebutton /
+    qt_dockwidget_floatbutton) : on les retrouve et on leur assigne une
+    icone claire generee comme le reste des icones de l'appli, sans toucher
+    au deplacement/detachement natifs du dock."""
+    close_btn = dock.findChild(QtCore.QObject, "qt_dockwidget_closebutton")
+    if close_btn is not None:
+        close_btn.setIcon(icon("close", size=12, color="#e6e6e6"))
+    float_btn = dock.findChild(QtCore.QObject, "qt_dockwidget_floatbutton")
+    if float_btn is not None:
+        float_btn.setIcon(icon("window", size=12, color="#e6e6e6"))

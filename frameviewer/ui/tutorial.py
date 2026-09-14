@@ -248,27 +248,28 @@ class FrameViewerTutorial(QtCore.QObject):
         return raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes")
 
     def _install_glow(self) -> None:
-        if self.completed():
-            return
-        effect = QtWidgets.QGraphicsDropShadowEffect(self.window.tutorial_btn)
-        effect.setColor(QtGui.QColor("#ff8a1f"))
-        effect.setOffset(0, 0)
-        effect.setBlurRadius(8)
-        self.window.tutorial_btn.setGraphicsEffect(effect)
-        animation = QtCore.QPropertyAnimation(effect, b"blurRadius", self)
-        animation.setStartValue(6.0)
-        animation.setEndValue(24.0)
-        animation.setDuration(900)
-        animation.setEasingCurve(QtCore.QEasingCurve.InOutSine)
-        animation.setLoopCount(-1)
-        animation.start()
-        self._glow_animation = animation
+        # Rappel visuel statique (pas d'animation clignotante) : orange rempli
+        # tant que le tutoriel n'est pas termine, gris standard une fois fait.
+        self._set_tutorial_reminder(not self.completed())
 
     def _remove_glow(self) -> None:
-        animation = getattr(self, "_glow_animation", None)
-        if animation is not None:
-            animation.stop()
-        self.window.tutorial_btn.setGraphicsEffect(None)
+        self._set_tutorial_reminder(False)
+
+    def _set_tutorial_reminder(self, active: bool) -> None:
+        btn = self.window.tutorial_btn
+        if active:
+            effect = QtWidgets.QGraphicsDropShadowEffect(btn)
+            effect.setColor(QtGui.QColor("#ff8a1f"))
+            effect.setOffset(0, 0)
+            effect.setBlurRadius(16)
+            btn.setGraphicsEffect(effect)
+            btn.setStyleSheet(
+                "background:#ff8a1f; color:#241200; font-weight:bold; "
+                "border:1px solid #ffb066; border-radius:5px; padding:4px 8px;"
+            )
+        else:
+            btn.setGraphicsEffect(None)
+            btn.setStyleSheet("")
 
     def start(self) -> None:
         if self.index >= 0:

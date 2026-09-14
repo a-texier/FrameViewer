@@ -203,6 +203,7 @@ EXACT_ENGLISH = {
     "Ouvrir le dossier": "Open folder",
     "Supprimer le plugin": "Delete plugin",
     "Ouvrir le panneau (dock)": "Open panel (dock)",
+    "Fermer le panneau (dock)": "Close panel (dock)",
     "Aucune entrée fichier.": "No file input.",
     "Aucune entree fichier.": "No file input.",
     "+ Entrée": "+ Input",

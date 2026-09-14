@@ -311,6 +311,8 @@ class PluginAPI:
         dock.setProperty("frameviewer_plugin_owned", True)
         dock.setWidget(widget)
         dock.setMinimumWidth(220)
+        from frameviewer.ui import icons as _icons
+        _icons.restyle_dock_titlebar_buttons(dock)
         last = getattr(self._mw, "_plugin_last_dock", None)
         if last is not None:
             try:
