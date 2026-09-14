@@ -1,12 +1,21 @@
-# FrameViewer
+<p align="center">
+  <img src="logo_frameviewer.png" alt="FrameViewer" width="140">
+</p>
 
-FrameViewer is a local desktop application for inspecting image sequences,
-videos and raw YUV streams. It provides synchronized multi-view navigation,
-contrast and LUT controls, annotations, regions of interest, frame extraction,
-conversion tools and a documented Python plugin API.
+<h1 align="center">FrameViewer</h1>
 
 <p align="center">
-  <img src="logo_frameviewer.png" alt="FrameViewer" width="620">
+  Local desktop application for inspecting image sequences, videos and raw
+  YUV streams, with synchronized multi-view navigation, contrast and LUT
+  controls, annotations, regions of interest, frame extraction, conversion
+  tools and a documented Python plugin API.
+</p>
+
+<p align="center">
+  <img alt="License AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue" />
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB" />
+  <img alt="PySide6 / Qt" src="https://img.shields.io/badge/UI-PySide6%20%2F%20Qt-41CD52" />
+  <img alt="Windows and Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-555" />
 </p>
 
 ![FrameViewer tutorial demo](gif_demo/FrameViewer_demo.gif)
