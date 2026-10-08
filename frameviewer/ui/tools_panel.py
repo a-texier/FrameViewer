@@ -13,16 +13,25 @@ from frameviewer.ui.i18n import set_ui_pair, set_ui_text, ui_text
 class LineProfCanvas(QtWidgets.QWidget):
     """Graphique de profil de ligne (QPainter, sans matplotlib)."""
 
+    sampleHovered = QtCore.Signal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(120)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                            QtWidgets.QSizePolicy.Fixed)
         self.profile = None
+        self._hover_index = -1
+        self.setMouseTracking(True)
 
     def set_profile(self, profile):
         self.profile = np.asarray(profile, dtype=np.float64) if profile is not None else None
+        self._hover_index = -1
         self.update()
+
+    def _plot_rect(self):
+        return QtCore.QRectF(45, 10, max(1, self.width() - 57),
+                             max(1, self.height() - 38))
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
@@ -31,17 +40,29 @@ class LineProfCanvas(QtWidgets.QWidget):
             p.setPen(QtGui.QColor(90, 90, 100))
             p.drawText(self.rect(), Qt.AlignCenter, "Tracez une ligne sur l'image")
             return
-        m, W, H = 8, self.width() - 16, self.height() - 30
+        plot = self._plot_rect()
+        left, top, W, H = plot.left(), plot.top(), plot.width(), plot.height()
         data = self.profile
         vmin, vmax = float(data.min()), float(data.max())
         if vmax <= vmin:
             vmax = vmin + 1.0
         n = len(data)
-        sx = lambda i: m + i / (n - 1) * W
-        sy = lambda v: m + H - (v - vmin) / (vmax - vmin) * H
+        sx = lambda i: left + i / (n - 1) * W
+        sy = lambda v: top + H - (v - vmin) / (vmax - vmin) * H
+        p.setPen(QtGui.QPen(QtGui.QColor(75, 75, 88), 1))
+        p.drawLine(QtCore.QLineF(left, top, left, top + H))
+        p.drawLine(QtCore.QLineF(left, top + H, left + W, top + H))
+        p.setPen(QtGui.QColor(145, 145, 158))
+        p.drawText(QtCore.QRectF(0, top - 6, left - 5, 14),
+                   Qt.AlignRight | Qt.AlignVCenter, f"{vmax:.1f}")
+        p.drawText(QtCore.QRectF(0, top + H - 7, left - 5, 14),
+                   Qt.AlignRight | Qt.AlignVCenter, f"{vmin:.1f}")
+        p.drawText(QtCore.QRectF(left, top + H + 3, W, 16), Qt.AlignLeft, "0 px")
+        p.drawText(QtCore.QRectF(left, top + H + 3, W, 16), Qt.AlignRight,
+                   f"{n - 1} px")
         if vmin <= 0 <= vmax:
             p.setPen(QtGui.QPen(QtGui.QColor(60, 60, 75), 1, Qt.DashLine))
-            p.drawLine(QtCore.QLineF(m, sy(0), m + W, sy(0)))
+            p.drawLine(QtCore.QLineF(left, sy(0), left + W, sy(0)))
         path = QtGui.QPainterPath()
         path.moveTo(sx(0), sy(data[0]))
         for i in range(1, n):
@@ -49,11 +70,40 @@ class LineProfCanvas(QtWidgets.QWidget):
         p.setPen(QtGui.QPen(QtGui.QColor(90, 200, 255), 1.5))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
-        p.setPen(QtGui.QColor(130, 130, 145))
-        base = m + H + 4
-        p.drawText(QtCore.QRectF(m, base, W, 14), Qt.AlignLeft,  f"{vmin:.0f}")
-        p.drawText(QtCore.QRectF(m, base, W, 14), Qt.AlignRight, f"{vmax:.0f}")
-        p.drawText(QtCore.QRectF(m, m, W, 14), Qt.AlignRight, f"{n - 1} px")
+        if 0 <= self._hover_index < n:
+            i = self._hover_index
+            hp = QtCore.QPointF(sx(i), sy(data[i]))
+            p.setPen(QtGui.QPen(QtGui.QColor(0, 230, 90), 1, Qt.DashLine))
+            p.drawLine(QtCore.QLineF(hp.x(), top, hp.x(), top + H))
+            p.setBrush(QtGui.QColor(0, 230, 90))
+            p.setPen(QtGui.QPen(QtGui.QColor(12, 12, 14), 1))
+            p.drawEllipse(hp, 4, 4)
+            p.setPen(QtGui.QColor(0, 230, 90))
+            p.drawText(QtCore.QRectF(left, 0, W, 16), Qt.AlignCenter,
+                       f"x={i} px   y={data[i]:.3f}")
+
+    def mouseMoveEvent(self, event):
+        if self.profile is None or len(self.profile) < 2:
+            return
+        plot = self._plot_rect()
+        if not plot.contains(event.position()):
+            if self._hover_index != -1:
+                self._hover_index = -1
+                self.sampleHovered.emit(-1)
+                self.update()
+            return
+        frac = (event.position().x() - plot.left()) / max(1.0, plot.width())
+        index = int(round(np.clip(frac, 0.0, 1.0) * (len(self.profile) - 1)))
+        if index != self._hover_index:
+            self._hover_index = index
+            self.sampleHovered.emit(index)
+            self.update()
+
+    def leaveEvent(self, event):
+        self._hover_index = -1
+        self.sampleHovered.emit(-1)
+        self.update()
+        super().leaveEvent(event)
 
 
 # ──────────────────────────── section repliable ───────────────────
@@ -107,6 +157,7 @@ class ToolsPanel(QtWidgets.QWidget):
     temporelle — chaque outil dans une section repliable (accordéon)."""
     modeRequested  = QtCore.Signal(str)       # "roi" | "line" | "ruler"
     tempSubChanged = QtCore.Signal(bool, int) # (enabled, k)
+    profileHovered = QtCore.Signal(int)       # index du profil, -1 hors graphe
     fft2dRequested = QtCore.Signal()          # FFT 2D spatiale sur la ROI courante
     roiConvertRequested = QtCore.Signal()     # export ROI (fixe/suivie) sur la séquence
 
@@ -148,6 +199,7 @@ class ToolsPanel(QtWidgets.QWidget):
         # ── profil de ligne ──
         self._line_sec = CollapsibleSection("Profil de ligne", expanded=False)
         self.prof_canvas = LineProfCanvas()
+        self.prof_canvas.sampleHovered.connect(self.profileHovered.emit)
         self._line_sec.addWidget(self.prof_canvas)
         self.prof_stats = QtWidgets.QLabel("─")
         self.prof_stats.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -162,7 +214,7 @@ class ToolsPanel(QtWidgets.QWidget):
         # ── règle multipoint ──
         self._ruler_sec = CollapsibleSection("Règle — distance / angle", expanded=False)
         self.ruler_lbl = QtWidgets.QLabel(
-            "Clic = ajouter un point\nClic droit = réinitialiser")
+            "Clic = ajouter un point\nClic droit = effacer le tracé")
         self.ruler_lbl.setWordWrap(True)
         self.ruler_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.ruler_lbl.setStyleSheet("font-size:11px; color:#bbb;")
@@ -184,9 +236,31 @@ class ToolsPanel(QtWidgets.QWidget):
         row_k.addWidget(QtWidgets.QLabel("k ="))
         self.sub_spin = QtWidgets.QSpinBox()
         self.sub_spin.setRange(1, 9999); self.sub_spin.setValue(1)
-        self.sub_spin.setFocusPolicy(Qt.NoFocus)
+        self.sub_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        self.sub_spin.setKeyboardTracking(False)
+        self.sub_spin.setFocusPolicy(Qt.StrongFocus)
         self.sub_spin.valueChanged.connect(self._emit_sub)
-        row_k.addWidget(self.sub_spin); row_k.addStretch(1)
+        def _step_button(text, tip):
+            button = QtWidgets.QToolButton()
+            button.setText(text)
+            button.setToolTip(tip)
+            button.setFixedSize(22, 22)
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setAutoRepeat(True)
+            button.setStyleSheet(
+                "QToolButton{background:#26262e;color:#ddd;border:1px solid #444;"
+                "border-radius:3px;font-size:13px;font-weight:bold;}"
+                "QToolButton:hover{border-color:#5aafff;color:#fff;}"
+                "QToolButton:pressed{background:#333340;}")
+            return button
+        sub_minus = _step_button("−", "Diminuer l'écart temporel")
+        sub_plus = _step_button("+", "Augmenter l'écart temporel")
+        sub_minus.clicked.connect(self.sub_spin.stepDown)
+        sub_plus.clicked.connect(self.sub_spin.stepUp)
+        row_k.addWidget(sub_minus)
+        row_k.addWidget(self.sub_spin, 1)
+        row_k.addWidget(sub_plus)
+        row_k.addStretch(1)
         self._sub_sec.addLayout(row_k)
         hint = QtWidgets.QLabel("Révèle mouvements et variations thermiques.")
         hint.setStyleSheet("color:#888; font-size:10px;")
@@ -227,14 +301,14 @@ class ToolsPanel(QtWidgets.QWidget):
         if not pts:
             set_ui_text(
                 self.ruler_lbl,
-                "Clic = ajouter un point\nClic droit = réinitialiser")
+                "Clic = ajouter un point\nClic droit = effacer le tracé")
             return
         lines = [f"P{i+1} = ({x}, {y})" for i, (x, y) in enumerate(pts)]
         if len(pts) >= 2:
             total = sum(math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])
                         for i in range(1, len(pts)))
-            french_total = f"Distance totale : {total:.2f} px"
-            english_total = f"Total distance: {total:.2f} px"
+            french_total = f"Périmètre en cours : {total:.2f} px"
+            english_total = f"Current perimeter: {total:.2f} px"
             lines.append((french_total, english_total))
             x1, y1 = pts[-2]; x2, y2 = pts[-1]
             angle = math.degrees(math.atan2(y2 - y1, x2 - x1))

@@ -2,51 +2,66 @@
 
 from __future__ import annotations
 
-import ast
 import importlib
+import pkgutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
 
 
 _CAPABILITY_DIR = Path(__file__).resolve().parent
+_PACKAGE = __name__.rsplit(".", 1)[0]  # "frameviewer.core"
+_SELF_MODULE = Path(__file__).stem
 
 
-def _read_capability(path: Path) -> dict[str, Any] | None:
+def _candidate_module_names() -> list[str]:
+    """Sous-modules de frameviewer.core susceptibles de porter une capacite.
+
+    On combine deux sources pour marcher aussi bien depuis les sources (fichiers
+    .py sur disque) que dans un exe PyInstaller gele : dans un onefile il n'y a
+    AUCUN .py sur disque (le code vit dans l'archive PYZ), donc un simple
+    glob("*.py") renvoie vide et les capacites deviennent invisibles.
+    iter_modules liste les sous-modules reellement embarques ; le glob sert de
+    repli quand on tourne depuis les sources."""
+    names: set[str] = set()
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (OSError, SyntaxError, UnicodeError):
-        return None
-    for node in tree.body:
-        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-            continue
-        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        if not any(
-            isinstance(target, ast.Name) and target.id == "FEATURE_CAPABILITY"
-            for target in targets
-        ):
-            continue
-        try:
-            value = ast.literal_eval(node.value)
-        except (ValueError, TypeError):
-            return None
-        if isinstance(value, dict) and isinstance(value.get("id"), str):
-            return value
-    return None
+        package = importlib.import_module(_PACKAGE)
+        for info in pkgutil.iter_modules(getattr(package, "__path__", [])):
+            names.add(info.name)
+    except Exception:
+        pass
+    try:
+        for path in _CAPABILITY_DIR.glob("*.py"):
+            if path.stem != "__init__":
+                names.add(path.stem)
+    except OSError:
+        pass
+    return sorted(names)
 
 
 def available_features(kind: str | None = None) -> list[dict[str, Any]]:
     features: list[dict[str, Any]] = []
-    for path in sorted(_CAPABILITY_DIR.glob("*.py")):
-        capability = _read_capability(path)
-        if capability is None or (kind and capability.get("kind") != kind):
+    for module_name in _candidate_module_names():
+        if module_name == _SELF_MODULE:
             continue
-        features.append({**capability, "module": path.stem})
+        try:
+            module = importlib.import_module(f"{_PACKAGE}.{module_name}")
+        except (Exception, SystemExit):
+            # Un module non lie a une capacite peut echouer ou meme appeler
+            # sys.exit a l'import (ex. utilitaire prevu comme script) : on ne
+            # laisse jamais ca tuer la decouverte.
+            continue
+        capability = getattr(module, "FEATURE_CAPABILITY", None)
+        if not (isinstance(capability, dict) and isinstance(capability.get("id"), str)):
+            continue
+        if kind and capability.get("kind") != kind:
+            continue
+        features.append({**capability, "module": module_name})
     return features
 
 
 def _load(capability: dict[str, Any]) -> ModuleType:
-    return importlib.import_module(f"frameviewer.core.{capability['module']}")
+    return importlib.import_module(f"{_PACKAGE}.{capability['module']}")
 
 
 def feature_for_path(path: str, kind: str | None = None) -> dict[str, Any] | None:

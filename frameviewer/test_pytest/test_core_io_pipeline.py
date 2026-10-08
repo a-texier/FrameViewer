@@ -4,6 +4,8 @@ import cv2
 import numpy as np
 import pytest
 
+from frameviewer.core.constants import SIGNED_DIFF_LUT
+
 from frameviewer.core.io_utils import (
     fmt_time,
     imread_unicode,
@@ -157,3 +159,14 @@ def test_patch_composition_places_each_corner(corner):
     output = composite_patches(base, [{"image": patch, "corner": corner, "margin": 2}])
     assert int(output.sum()) == 4 * 6 * 3 * 255
     assert int(base.sum()) == 0
+
+
+def test_signed_difference_lut_maps_negative_red_zero_black_positive_blue():
+    signed = np.array([[-65535.0, 0.0, 65535.0]], dtype=np.float32)
+    rendered = render_frame(
+        signed, -65535, 65535, SIGNED_DIFF_LUT,
+        full_range=(-65535, 65535))
+    negative, zero, positive = rendered[0]
+    assert int(negative[2]) > int(negative[0])
+    assert np.array_equal(zero, [0, 0, 0])
+    assert int(positive[0]) > int(positive[2])

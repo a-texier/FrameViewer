@@ -173,3 +173,32 @@ def test_conversion_worker_reports_unknown_source(qapp, tmp_path):
     assert worker.wait(5000)
     qapp.processEvents()
     assert failed.count() == 1 and "inconnu" in failed.at(0)[0]
+
+
+def test_conversion_worker_signed_temporal_difference_16bit(qapp, tmp_path):
+    input_dir = tmp_path / "input16"
+    input_dir.mkdir()
+    first = np.full((8, 10), 40000, dtype=np.uint16)
+    second = first.copy()
+    second[:, :5] = 30000
+    second[:, 5:] = 50000
+    paths = []
+    for index, image in enumerate((first, second)):
+        path = input_dir / f"frame_{index:03d}.png"
+        assert cv2.imwrite(str(path), image)
+        paths.append(str(path))
+    output = tmp_path / "diff8"
+    worker = ConvertWorker(
+        "images", paths, str(output), "png8", -10000, 10000,
+        "coolwarm_r_black", None, 0, 1, (-10000, 10000),
+        filters={}, fps=12.0, temporal_sub_k=1,
+    )
+    failed = QtTest.QSignalSpy(worker.failed)
+    worker.start()
+    assert worker.wait(10000)
+    qapp.processEvents()
+    assert failed.count() == 0
+    rendered = cv2.imread(str(output / "frame_000001.png"))
+    assert rendered is not None
+    assert rendered[0, 1, 2] > rendered[0, 1, 0]
+    assert rendered[0, 8, 0] > rendered[0, 8, 2]

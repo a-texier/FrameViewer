@@ -5,6 +5,9 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
+from frameviewer.core.constants import SIGNED_DIFF_LUT
+from frameviewer.core.pipeline import signed_diff_colormap
+
 class ColorBar(QtWidgets.QWidget):
     """Échelle de couleur : dégradé de la LUT courante, bornes lo/hi affichées."""
 
@@ -31,6 +34,8 @@ class ColorBar(QtWidgets.QWidget):
         ramp = np.linspace(0, 255, max(2, w)).astype(np.uint8).reshape(1, -1)
         if self._lut is None or self._lut == "gray":
             bgr = cv2.cvtColor(ramp, cv2.COLOR_GRAY2BGR)
+        elif self._lut == SIGNED_DIFF_LUT:
+            bgr = signed_diff_colormap(ramp)
         else:
             try:
                 bgr = cv2.applyColorMap(ramp, int(self._lut))

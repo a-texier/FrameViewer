@@ -7,6 +7,24 @@ Frames enter and leave this module as NumPy arrays. See
 import cv2
 import numpy as np
 
+from frameviewer.core.constants import SIGNED_DIFF_LUT
+
+
+def signed_diff_colormap(gray8):
+    """Diverging red -> black -> blue map, with zero mapped to black."""
+    anchors_x = np.array([0, 102, 127, 128, 153, 255], dtype=np.float32)
+    # BGR anchors approximate matplotlib coolwarm_r, with a hard black center.
+    anchors_bgr = np.array([
+        [38, 4, 180], [173, 196, 238], [0, 0, 0], [0, 0, 0],
+        [234, 202, 179], [192, 76, 59],
+    ], dtype=np.float32)
+    values = np.arange(256, dtype=np.float32)
+    lut = np.empty((256, 3), dtype=np.uint8)
+    for channel in range(3):
+        lut[:, channel] = np.clip(
+            np.interp(values, anchors_x, anchors_bgr[:, channel]), 0, 255)
+    return lut[np.asarray(gray8, dtype=np.uint8)]
+
 def load_cube(path):
     """Parse a 3D ``.cube`` LUT and return ``(lut, size)``.
 
@@ -162,6 +180,9 @@ def apply_filters(bgr, flags):
 def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
                  full_range=(0, 255), filters=None):
     """Render a native frame as uint8 BGR ready for display or export."""
+    if lut_data == SIGNED_DIFF_LUT:
+        amplitude = max(abs(float(lo)), abs(float(hi)), 1e-6)
+        lo, hi = -amplitude, amplitude
     # Normalize BGRA to BGR by dropping alpha.
     if raw.ndim == 3 and raw.shape[2] == 4:
         raw = raw[:, :, :3]
@@ -179,6 +200,8 @@ def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
         g8 = window8(inten, lo, hi)
         if lut_data is None or lut_data == "gray":
             base = cv2.cvtColor(g8, cv2.COLOR_GRAY2BGR)
+        elif lut_data == SIGNED_DIFF_LUT:
+            base = signed_diff_colormap(g8)
         else:
             base = cv2.applyColorMap(g8, int(lut_data))
     if cube_lut is not None:

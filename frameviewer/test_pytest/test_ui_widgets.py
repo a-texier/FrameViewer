@@ -10,6 +10,7 @@ from frameviewer.ui.histogram import HistCanvas, HistogramLUT
 from frameviewer.ui.multiview import FrameSlider
 from frameviewer.ui.multiview import MultiViewOverlay
 from frameviewer.ui.plugins_panel import InputDropZone
+from frameviewer.ui.tools_panel import LineProfCanvas, ToolsPanel
 
 
 def _drop_path(widget, path):
@@ -74,6 +75,39 @@ def test_color_bar_renders_gray_and_colormap(qapp):
     colored = bar.grab().toImage()
     assert colored.pixelColor(250, 5) != gray.pixelColor(250, 5)
     bar.close()
+
+
+def test_temporal_gap_uses_keyboard_field_and_explicit_step_buttons(qapp):
+    panel = ToolsPanel()
+    assert panel.sub_spin.focusPolicy() == Qt.StrongFocus
+    assert panel.sub_spin.buttonSymbols() == QtWidgets.QAbstractSpinBox.NoButtons
+    buttons = panel._sub_sec.body.findChildren(QtWidgets.QToolButton)
+    minus = next(button for button in buttons if button.text() == "−")
+    plus = next(button for button in buttons if button.text() == "+")
+    plus.click()
+    assert panel.sub_spin.value() == 2
+    minus.click()
+    assert panel.sub_spin.value() == 1
+
+
+def test_line_profile_hover_emits_nearest_sample(qapp):
+    canvas = LineProfCanvas()
+    canvas.resize(420, 120)
+    canvas.set_profile(np.array([10.0, 30.0, 20.0, 80.0, 40.0]))
+    canvas.show()
+    qapp.processEvents()
+    spy = QtTest.QSignalSpy(canvas.sampleHovered)
+    plot = canvas._plot_rect()
+    QtTest.QTest.mouseMove(canvas, QtCore.QPoint(int(plot.right()), int(plot.center().y())))
+    assert spy.count() >= 1
+    assert spy.at(spy.count() - 1)[0] == 4
+    canvas.close()
+
+
+def test_ruler_panel_reports_current_perimeter(qapp):
+    panel = ToolsPanel()
+    panel.update_ruler_pts([(0, 0), (3, 4), (6, 8)])
+    assert "Périmètre en cours : 10.00 px" in panel.ruler_lbl.text()
 
 
 def test_frame_slider_keeps_extract_and_segment_state(qapp):

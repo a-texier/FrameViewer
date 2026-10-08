@@ -29,7 +29,8 @@ except ImportError:
 
 from frameviewer.core.annotations import (_ann_color, _rotate_box_coords,
                                           bake_sidecar_overlays, draw_annotation_boxes)
-from frameviewer.core.constants import COLORMAPS, FRENCH_COLORS, IMAGE_EXTS, VIDEO_EXTS
+from frameviewer.core.constants import (COLORMAPS, FRENCH_COLORS, IMAGE_EXTS,
+                                        SIGNED_DIFF_LUT, VIDEO_EXTS)
 from frameviewer.core.feature_registry import (extensions_for_kind,
                                                 operation_for_kind,
                                                 supports_path)
@@ -137,6 +138,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._user_adjusting = False  # True quand refresh_frame est appele par l'user (drag/spin)
         self._temp_sub_on = False     # soustraction temporelle activee
         self._temp_sub_k  = 1        # decalage k frames
+        self._temp_sub_restore = None # LUT + histogramme avant activation
+        self._temp_sub_needs_window = False
+        self._profile_coords = None   # (xs, ys) du dernier profil de ligne
         self._display_bgr = None     # derniere frame rendue (pour Ctrl+C)
         self._capture_fmt = "png"
         # --- prefetch ---
@@ -911,6 +915,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tools_panel.roiConvertRequested.connect(self._on_roi_convert)
         self.view.lineChanged.connect(self._on_line_changed)
         self.view.rulerChanged.connect(self._on_ruler_changed)
+        self.tools_panel.profileHovered.connect(self._on_profile_hovered)
 
     def _toggle_tools_dock(self):
         self.tools_dock.setVisible(self.tools_btn.isChecked())
@@ -931,6 +936,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tools_panel.roi_panel.clear()
         self.tools_panel.update_profile(None)
         self.tools_panel.update_ruler_pts([])
+        self._profile_coords = None
+        self.view.set_line_probe()
         if self._raw is not None:
             self._display()
 
@@ -949,13 +956,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_line_changed(self, x1, y1, x2, y2):
         """Appelé par VideoWidget quand un profil de ligne est tracé."""
         if self._raw is not None:
-            inten = to_intensity(self._apply_rotation(self._raw))
+            analysis = self._temporal_difference(self._raw, self.cur)
+            inten = to_intensity(self._apply_rotation(analysis))
             h, w = inten.shape[:2]
             n = max(abs(x2 - x1), abs(y2 - y1), 1)
             xs = np.linspace(x1, x2, n + 1).clip(0, w - 1).astype(int)
             ys = np.linspace(y1, y2, n + 1).clip(0, h - 1).astype(int)
             profile = inten[ys, xs].astype(np.float64)
+            self._profile_coords = (xs, ys)
             self.tools_panel.update_profile(profile)
+
+    def _on_profile_hovered(self, index):
+        coords = self._profile_coords
+        profile = getattr(self.tools_panel, "_profile", None)
+        if (index < 0 or coords is None or profile is None
+                or index >= len(profile) or index >= len(coords[0])):
+            self.view.set_line_probe()
+            return
+        self.view.set_line_probe(coords[0][index], coords[1][index], profile[index])
 
     def _on_ruler_changed(self, pts):
         """Appelé par VideoWidget quand la polyligne de la règle change."""
@@ -1897,9 +1915,52 @@ class MainWindow(QtWidgets.QMainWindow):
                 s._timer.start(int(1000.0 / max(fps, 0.1)))
 
     def _on_temp_sub(self, enabled, k):
+        enabled = bool(enabled)
+        if enabled and not self._temp_sub_on:
+            self._temp_sub_restore = {
+                "lut_index": self.lut_combo.currentIndex(),
+                "domain": self.hist.full_range,
+                "window": (self.hist.lo, self.hist.hi),
+                "mode": self.hist.per_frame_mode(),
+            }
+            diff_index = self.lut_combo.findData(SIGNED_DIFF_LUT)
+            if diff_index >= 0:
+                self.lut_combo.setCurrentIndex(diff_index)
+            self.hist.set_mode_silent("Custom")
+            self._temp_sub_needs_window = True
+        elif not enabled and self._temp_sub_on:
+            restore = self._temp_sub_restore or {}
+            lut_index = restore.get("lut_index", -1)
+            if 0 <= lut_index < self.lut_combo.count():
+                self.lut_combo.setCurrentIndex(lut_index)
+            domain = restore.get("domain")
+            window = restore.get("window")
+            if domain is not None:
+                self.hist.set_data_range(*domain)
+            if window is not None:
+                self.hist.set_window(*window, emit=False)
+            self.hist.set_mode_silent(restore.get("mode", "Custom"))
+            self._temp_sub_restore = None
+            self._temp_sub_needs_window = False
         self._temp_sub_on = enabled
         self._temp_sub_k  = k
         self.refresh_frame()
+
+    def _temporal_difference(self, frame, frame_index, rotate_reference=False):
+        """Signed N - (N-k) difference in float32, safe for uint8/uint16."""
+        if not self._temp_sub_on or self.source is None or frame is None:
+            return frame
+        ref_idx = max(0, int(frame_index) - max(1, int(self._temp_sub_k)))
+        ref_raw = self.source.get(ref_idx)
+        if ref_raw is None:
+            return frame
+        if rotate_reference:
+            ref_raw = self._apply_rotation(ref_raw)
+        current = to_intensity(frame).astype(np.float32)
+        reference = to_intensity(ref_raw).astype(np.float32)
+        if current.shape != reference.shape:
+            return frame
+        return current - reference
 
     def _build_convlog_dock(self):
         # Onglet 1 : Plugins (remplace l'ancien onglet "Conversions" -- son
@@ -4796,10 +4857,17 @@ labels/frame_05000.txt
     def _display(self):
         if self._raw is None:
             return
-        inten = to_intensity(self._raw)
+        analysis_raw = self._temporal_difference(self._raw, self.cur)
+        inten = to_intensity(analysis_raw)
         mode = self.hist.per_frame_mode()
+        if self._temp_sub_on:
+            amplitude = max(abs(float(np.min(inten))), abs(float(np.max(inten))), 1.0)
+            self.hist.set_data_range(-amplitude, amplitude)
+            if self._temp_sub_needs_window:
+                self.hist.set_window(-amplitude, amplitude, emit=False)
+                self._temp_sub_needs_window = False
         # certains modes par frame redefinissent aussi le domaine de l'histogramme
-        if mode == "Min/Max":
+        elif mode == "Min/Max":
             self.hist.set_data_range(float(np.min(inten)), float(np.max(inten)))
         elif mode == "Pleine plage":
             self.hist.set_data_range(*self._full_amplitude())
@@ -4813,16 +4881,21 @@ labels/frame_05000.txt
             elif mode == "Pleine plage":
                 self.hist.set_window(*self._full_amplitude(), emit=False)
         raw_rot = self._apply_rotation(self._raw)
+        analysis_rot = self._apply_rotation(analysis_raw)
         # source pour la sonde : intensité native après rotation (mêmes coords que l'affichage)
         try:
-            self._probe_src = to_intensity(raw_rot)
+            self._probe_src = to_intensity(analysis_rot)
         except Exception:
             self._probe_src = None
         # colorbar : LUT + fenêtre courantes
         if hasattr(self, "colorbar"):
             self.colorbar.set_lut(self.lut_combo.currentData())
-            self.colorbar.set_range(self.hist.lo, self.hist.hi)
-        out = self.process(raw_rot)
+            if self.lut_combo.currentData() == SIGNED_DIFF_LUT:
+                amplitude = max(abs(self.hist.lo), abs(self.hist.hi), 1e-6)
+                self.colorbar.set_range(-amplitude, amplitude)
+            else:
+                self.colorbar.set_range(self.hist.lo, self.hist.hi)
+        out = self.process(raw_rot, self.cur)
         if self._dyn_crop and self._roi is not None:
             _x, _y, _w, _h = self._roi
             _Hf, _Wf = out.shape[:2]
@@ -4920,7 +4993,7 @@ labels/frame_05000.txt
             self.tools_panel.roi_panel.clear()
             return
         inten_crop = inten[y:y2, x:x2]
-        disp = self.process(raw_rot)
+        disp = self.process(raw_rot, self.cur)
         bgr_crop = disp[y:y2, x:x2] if disp is not None else None
         self.tools_panel.roi_panel.update_crop(bgr_crop, inten_crop)
 
@@ -5111,22 +5184,13 @@ labels/frame_05000.txt
             self.play()
 
     # ----- LUT / rendu -----
-    def process(self, frame):
+    def process(self, frame, frame_index=None):
         if frame is None:
             return None
         cube = None  # LUT .cube supprimee de l'UI
         try:
-            raw = frame
-            # Soustraction temporelle |N - (N-k)|
-            if self._temp_sub_on and self.source is not None:
-                k = max(1, self._temp_sub_k)
-                ref_idx = max(0, self.cur - k)
-                ref_raw = self.source.get(ref_idx)
-                if ref_raw is not None:
-                    a = to_intensity(raw).astype(np.float32)
-                    b = to_intensity(ref_raw).astype(np.float32)
-                    if a.shape == b.shape:
-                        raw = np.abs(a - b).astype(np.float32)
+            idx = self.cur if frame_index is None else int(frame_index)
+            raw = self._temporal_difference(frame, idx, rotate_reference=True)
             return render_frame(raw, self.hist.lo, self.hist.hi,
                                 self.lut_combo.currentData(), cube, self._cube_size,
                                 self.hist.full_range, self._filter_flags())
@@ -5145,7 +5209,7 @@ labels/frame_05000.txt
             return None
         orig_h, orig_w = frame.shape[:2]
         raw_rot = self._apply_rotation(frame)
-        out = self.process(raw_rot)
+        out = self.process(raw_rot, idx)
         if out is None:
             return None
         if out.ndim == 2:
@@ -5228,6 +5292,7 @@ labels/frame_05000.txt
             t = [("mp4",
                   "Video MP4  (rendu 3-sigma -> 8 bits)" if is16
                   else "Video MP4")]
+            t.append(("png8", "Dossier PNG 8 bits  (rendu affiché)"))
             if is16:
                 t.append(("png16", "Dossier PNG 16 bits  (donnees brutes)"))
             if specialized_ok:
@@ -5384,7 +5449,9 @@ labels/frame_05000.txt
         worker = ConvertWorker(src_kind, src_arg, out_path, mode,
                                self.hist.lo, self.hist.hi, self.lut_combo.currentData(),
                                cube, self._cube_size, step, self.hist.full_range,
-                               self._filter_flags(), fps)
+                               self._filter_flags(), fps,
+                               temporal_sub_k=(self._temp_sub_k
+                                               if self._temp_sub_on else 0))
         labels = {"png8": "PNG 8 bits", "png16": "PNG 16 bits", "mp4": "MP4", "specialized": "SPECIALIZED"}
         label = labels.get(mode, mode)
         src_name = self.source.name

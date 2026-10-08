@@ -48,6 +48,7 @@ class VideoWidget(QtWidgets.QWidget):
         self._tool_mode = "roi"
         self._line = None          # (x1,y1,x2,y2) en cours de trace
         self._line_start = None    # point de depart du trace
+        self._line_probe = None    # (x, y, value) pilote par le mini-profil
         self._ruler_pts = []       # [(x,y)] 0/1/2 points cliques
 
     def set_tool_mode(self, mode):
@@ -55,6 +56,7 @@ class VideoWidget(QtWidgets.QWidget):
         self._tool_mode = mode
         self._line = None
         self._line_start = None
+        self._line_probe = None
         self._ruler_pts = []
         cur = {
             "roi":   Qt.ArrowCursor,
@@ -78,6 +80,10 @@ class VideoWidget(QtWidgets.QWidget):
             qimg = QtGui.QImage(bgr.data, w, h, bgr.strides[0], QtGui.QImage.Format_BGR888)
         self._iw, self._ih = w, h
         self._pixmap = QtGui.QPixmap.fromImage(qimg)
+        self.update()
+
+    def set_line_probe(self, x=None, y=None, value=None):
+        self._line_probe = None if x is None or y is None else (int(x), int(y), value)
         self.update()
 
     def set_markers(self, markers):
@@ -283,6 +289,17 @@ class VideoWidget(QtWidgets.QWidget):
             for px, py in ((x1, y1), (x2, y2)):
                 p.drawEllipse(self._w(px, py), 4, 4)
             p.setBrush(Qt.NoBrush)
+            if self._line_probe is not None:
+                px, py, value = self._line_probe
+                wp = self._w(px, py)
+                p.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0), 3))
+                p.setBrush(QtGui.QColor(0, 230, 90))
+                p.drawEllipse(wp, 6, 6)
+                label = f"({px}, {py})  {float(value):.3f}" if value is not None else f"({px}, {py})"
+                p.setPen(QtGui.QColor(0, 0, 0))
+                p.drawText(wp + QtCore.QPointF(9, -5), label)
+                p.setPen(QtGui.QColor(0, 230, 90))
+                p.drawText(wp + QtCore.QPointF(8, -6), label)
         # ── règle multipoint (outil ruler) ──
         if self._tool_mode == "ruler" and self._ruler_pts:
             pts_w = [self._w(x, y) for (x, y) in self._ruler_pts]
@@ -305,6 +322,15 @@ class VideoWidget(QtWidgets.QWidget):
                 p.drawText(mid + QtCore.QPointF(7, 1), f"{dist:.1f}px")
                 p.setPen(QtGui.QColor(255, 120, 0))
                 p.drawText(mid + QtCore.QPointF(6, 0), f"{dist:.1f}px")
+            if len(pts_w) >= 2:
+                total = sum(math.hypot(self._ruler_pts[i][0] - self._ruler_pts[i-1][0],
+                                       self._ruler_pts[i][1] - self._ruler_pts[i-1][1])
+                            for i in range(1, len(self._ruler_pts)))
+                last = pts_w[-1]
+                p.setPen(QtGui.QColor(0, 0, 0))
+                p.drawText(last + QtCore.QPointF(9, 17), f"Σ {total:.1f}px")
+                p.setPen(QtGui.QColor(255, 190, 70))
+                p.drawText(last + QtCore.QPointF(8, 16), f"Σ {total:.1f}px")
 
     def _draw_overlays(self, p):
         for g in self._overlays:

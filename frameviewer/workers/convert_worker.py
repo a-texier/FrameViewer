@@ -26,7 +26,7 @@ class ConvertWorker(QtCore.QThread):
 
     def __init__(self, src_kind, src_arg, out_path, mode, lo, hi, lut_data,
                  cube_lut, cube_size, step, full_range,
-                 filters=None, fps=25.0, parent=None):
+                 filters=None, fps=25.0, parent=None, temporal_sub_k=0):
         super().__init__(parent)
         self.src_kind = src_kind    # "specialized" | "video" | "images"
         self.src_arg = src_arg      # One media path or a list of image paths.
@@ -39,6 +39,7 @@ class ConvertWorker(QtCore.QThread):
         self.full_range = full_range
         self.filters = filters or {}
         self.fps = float(fps) if fps and fps > 0 else 25.0
+        self.temporal_sub_k = max(0, int(temporal_sub_k))
         self._stop = False
 
     def stop(self):
@@ -79,6 +80,16 @@ class ConvertWorker(QtCore.QThread):
                 raw = src.get(i)
                 if raw is None:
                     continue
+                # Temporal subtraction is a display operation. Apply it only
+                # to rendered exports; PNG16 and SPECIALIZED keep their documented raw
+                # data contract instead of clipping signed differences.
+                if self.temporal_sub_k and self.mode in ("png8", "mp4"):
+                    ref = src.get(max(0, i - self.temporal_sub_k))
+                    if ref is not None:
+                        current = to_intensity(raw).astype(np.float32)
+                        previous = to_intensity(ref).astype(np.float32)
+                        if current.shape == previous.shape:
+                            raw = current - previous
                 if self.mode == "specialized":
                     inten = to_intensity(raw)
                     if inten.ndim == 3 and inten.shape[2] == 1:

@@ -2,6 +2,8 @@
 """Shared media extensions, LUT palettes, and named colors."""
 import cv2
 
+SIGNED_DIFF_LUT = "coolwarm_r_black"
+
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".wmv", ".flv", ".webm",
               ".mpg", ".mpeg", ".ts", ".m2ts", ".mts"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".jp2"}
@@ -21,6 +23,7 @@ COLORMAPS = {
     "Rainbow": cv2.COLORMAP_RAINBOW,
     "HSV": cv2.COLORMAP_HSV,
     "Parula": cv2.COLORMAP_PARULA,
+    "Coolwarm_r noir = 0": SIGNED_DIFF_LUT,
 }
 
 # French color aliases accepted by legacy annotation files, in RGB 0..255.
