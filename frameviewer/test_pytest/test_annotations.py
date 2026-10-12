@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -53,8 +52,10 @@ def test_annotation_path_detection_and_non_recursive_scan(tmp_path):
 
 @pytest.mark.parametrize(
     ("coords", "expected"),
-    [((0.5, 0.5, 0.2, 0.4, 100, 50), (40, 15, 60, 35)),
-     ((0.5, 0.5, 0.2, 0.4, 0, 50), (0, 0, 1, 1))],
+    [
+        ((0.5, 0.5, 0.2, 0.4, 100, 50), (40, 15, 60, 35)),
+        ((0.5, 0.5, 0.2, 0.4, 0, 50), (0, 0, 1, 1)),
+    ],
 )
 def test_normalized_box_conversion(coords, expected):
     assert _yolo_norm_to_pixel(*coords) == expected
@@ -109,8 +110,14 @@ def test_export_yolo_writes_labels_images_yaml_and_progress(tmp_path):
         return np.full((50, 100, 3), index * 20, np.uint8)
 
     counts = export_yolo(
-        annotations, [0, 1, 2], 100, 50, tmp_path,
-        class_names=["vehicle"], ratios=(1, 0, 0), frame_provider=frame_provider,
+        annotations,
+        [0, 1, 2],
+        100,
+        50,
+        tmp_path,
+        class_names=["vehicle"],
+        ratios=(1, 0, 0),
+        frame_provider=frame_provider,
         progress_cb=lambda done, total: progress.append((done, total)),
     )
     assert counts == {"train": 3, "val": 0, "test": 0}

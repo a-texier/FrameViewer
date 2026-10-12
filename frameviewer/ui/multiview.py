@@ -2,11 +2,11 @@
 """Grille multi-vues : mini-barre de lecture, cadre de vue commun
 (BaseViewFrame/PrimaryFrame/SatelliteView), fusion (blend), SplitCanvas,
 et le slider de navigation avec zone IN/OUT."""
+
 import math
 import os
 
 import cv2
-import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
@@ -15,28 +15,37 @@ from frameviewer.core.feature_registry import supports_path
 from frameviewer.core.io_utils import fmt_time
 from frameviewer.core.pipeline import BLEND_MODES, blend_frames, render_frame
 from frameviewer.core.plugin_render import alpha_over
+from frameviewer.core.sources import frame_info
 
 try:
     from frameviewer.core.annotation_loader import is_annotation_path
 except ImportError:
+
     def is_annotation_path(path):
         return os.path.splitext(path)[1].lower() in (".ver", ".txt")
-from frameviewer.ui.video_widget import VideoWidget
+
+
+from frameviewer.ui import icons
+from frameviewer.ui.video_widget import VideoWidget, probe_text
+
 
 class MiniBar(QtWidgets.QWidget):
     """Barre de lecture compacte présente sur CHAQUE vue en multivue."""
-    first       = QtCore.Signal()
-    prev        = QtCore.Signal()
-    nxt         = QtCore.Signal()
-    last        = QtCore.Signal()
+
+    first = QtCore.Signal()
+    prev = QtCore.Signal()
+    nxt = QtCore.Signal()
+    last = QtCore.Signal()
     playToggled = QtCore.Signal(bool)
     loopToggled = QtCore.Signal(bool)
-    seek        = QtCore.Signal(int)
+    seek = QtCore.Signal(int)
 
-    _BS = ("QPushButton{padding:0px;border:1px solid #444;border-radius:2px;"
-           "background:#1c1c22;color:#ccc;font-size:10px;}"
-           "QPushButton:hover{border-color:#5aafff;}"
-           "QPushButton:checked{background:#2d4f70;border-color:#5aafff;color:#fff;}")
+    _BS = (
+        "QPushButton{padding:0px;border:1px solid #444;border-radius:2px;"
+        "background:#1c1c22;color:#ccc;font-size:10px;}"
+        "QPushButton:hover{border-color:#5aafff;}"
+        "QPushButton:checked{background:#2d4f70;border-color:#5aafff;color:#fff;}"
+    )
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -46,8 +55,10 @@ class MiniBar(QtWidgets.QWidget):
         self.slider.setFixedHeight(14)
         self.slider.valueChanged.connect(self.seek.emit)
 
-        def _b(txt, tip, checkable=False):
-            b = QtWidgets.QPushButton(txt)
+        def _b(icon_name, tip, checkable=False):
+            b = QtWidgets.QPushButton()
+            b.setIcon(icons.icon(icon_name, size=12))
+            b.setIconSize(QtCore.QSize(12, 12))
             b.setFixedSize(20, 17)
             b.setFocusPolicy(Qt.NoFocus)
             b.setCheckable(checkable)
@@ -55,12 +66,12 @@ class MiniBar(QtWidgets.QWidget):
             b.setStyleSheet(self._BS)
             return b
 
-        self.b_first = _b("|◀", "Première frame")
-        self.b_prev  = _b("◀", "Frame précédente")
-        self.b_play  = _b("▶", "Lecture / pause", True)
-        self.b_next  = _b("▶|", "Frame suivante")
-        self.b_last  = _b("▶▶", "Dernière frame")
-        self.b_loop  = _b("↻", "Lecture en boucle", True)
+        self.b_first = _b("skip_first", "Première frame")
+        self.b_prev = _b("step_back", "Frame précédente")
+        self.b_play = _b("play", "Lecture / pause", True)
+        self.b_next = _b("step_forward", "Frame suivante")
+        self.b_last = _b("skip_last", "Dernière frame")
+        self.b_loop = _b("loop", "Lecture en boucle", True)
         self.b_first.clicked.connect(self.first.emit)
         self.b_prev.clicked.connect(self.prev.emit)
         self.b_next.clicked.connect(self.nxt.emit)
@@ -74,8 +85,7 @@ class MiniBar(QtWidgets.QWidget):
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(2, 0, 2, 1)
         row.setSpacing(2)
-        for b in (self.b_first, self.b_prev, self.b_play,
-                  self.b_next, self.b_last, self.b_loop):
+        for b in (self.b_first, self.b_prev, self.b_play, self.b_next, self.b_last, self.b_loop):
             row.addWidget(b)
         row.addWidget(self.lbl, 1)
 
@@ -107,8 +117,66 @@ class MiniBar(QtWidgets.QWidget):
     def set_playing(self, on):
         self.b_play.blockSignals(True)
         self.b_play.setChecked(on)
-        self.b_play.setText("⏸" if on else "▶")
+        self.b_play.setIcon(icons.icon("pause" if on else "play", size=12))
         self.b_play.blockSignals(False)
+
+
+class InfoBar(QtWidgets.QLabel):
+    """Infos discretes sous l'image, sur deux lignes : chemin du fichier puis
+    taille / type / fps / position / horodatage. Chaque ligne est raccourcie
+    a la largeur de la vue (le chemin par la gauche, pour garder le nom du
+    fichier) ; texte complet dans l'infobulle.
+    """
+
+    SEPARATOR = "  |  "
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("view_info_bar")
+        self.setStyleSheet("background:#141418; color:#8a8a95; font-size:9px; padding:0px 4px;")
+        self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
+        self._full = ""
+
+    def set_info(self, text):
+        self._full = text or ""
+        self.setToolTip(self._full)
+        self.updateGeometry()
+        self.update()
+
+    def full_text(self):
+        return self._full
+
+    def sizeHint(self):
+        return QtCore.QSize(10, 2 * self.fontMetrics().height() + 2)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def _display_lines(self, width):
+        """(chemin, infos) raccourcis a ``width`` pixels."""
+        fm = self.fontMetrics()
+        path, sep, facts = self._full.partition(self.SEPARATOR)
+        if not sep:
+            path, facts = "", self._full
+        return (
+            fm.elidedText(path, Qt.ElideLeft, width),
+            fm.elidedText(facts, Qt.ElideRight, width),
+        )
+
+    def paintEvent(self, _e):
+        p = QtGui.QPainter(self)
+        r = self.contentsRect().adjusted(4, 1, -4, -1)
+        p.setPen(self.palette().color(QtGui.QPalette.WindowText))
+        top, bottom = self._display_lines(r.width())
+        half = r.height() // 2
+        p.drawText(
+            QtCore.QRect(r.left(), r.top(), r.width(), half), Qt.AlignVCenter | Qt.AlignLeft, top
+        )
+        p.drawText(
+            QtCore.QRect(r.left(), r.top() + half, r.width(), r.height() - half),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            bottom,
+        )
 
 
 # ─────────────────────── cadre commun d'une vue ───────────────────
@@ -116,20 +184,24 @@ class BaseViewFrame(QtWidgets.QFrame):
     """Bandeau [i] nom + mini-barre + sélection + drops + échange par clic droit.
     Toutes les vues (principale ou secondaire) en héritent : elles sont
     strictement identiques du point de vue de l'utilisateur."""
-    activated      = QtCore.Signal(int)        # position cliquée
-    doubled        = QtCore.Signal(int)        # double-clic -> plein écran
-    mediaDropped   = QtCore.Signal(int, list)  # média déposé
-    overlayDropped = QtCore.Signal(int, str)   # .sidecar / .ver déposé
-    folderDropped  = QtCore.Signal(int, str)   # dossier seul déposé (média +/- annotations)
-    swapRequested  = QtCore.Signal(int, int)   # (depuis_pos, vers_pos)
-    convertClicked = QtCore.Signal(int)        # bouton "Convertir" de la vue
-    navInteracted  = QtCore.Signal(int)        # play/precedent/suivant de CETTE vue touche a la main
-    frameChanged   = QtCore.Signal(int, int)   # position et frame affichee
 
-    _SS_IDLE   = "QFrame#vf{border:2px solid #333;background:#0e0e10;}"
+    activated = QtCore.Signal(int)  # position cliquée
+    doubled = QtCore.Signal(int)  # double-clic -> plein écran
+    mediaDropped = QtCore.Signal(int, list)  # média déposé
+    overlayDropped = QtCore.Signal(int, str)  # .sidecar / .ver déposé
+    folderDropped = QtCore.Signal(int, str)  # dossier seul déposé (média +/- annotations)
+    swapRequested = QtCore.Signal(int, int)  # (depuis_pos, vers_pos)
+    convertClicked = QtCore.Signal(int)  # bouton "Convertir" de la vue
+    navInteracted = QtCore.Signal(int)  # play/precedent/suivant de CETTE vue touche a la main
+    frameChanged = QtCore.Signal(int, int)  # position et frame affichee
+
+    _SS_IDLE = "QFrame#vf{border:2px solid #333;background:#0e0e10;}"
     _SS_ACTIVE = "QFrame#vf{border:2px solid #5aafff;background:#0e0e10;}"
     _SS_ACTIVE_GREEN = "QFrame#vf{border:2px solid #3ad06a;background:#0e0e10;}"
     _SS_FROZEN = "QFrame#vf{border:2px solid #4a4a52;background:#141416;}"
+
+    # Reglage global (Parametres) applique aussi aux vues creees plus tard.
+    info_bar_enabled = True
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -142,29 +214,34 @@ class BaseViewFrame(QtWidgets.QFrame):
         self._drag_from = None
         self._vid = None
         self._is_active = False
-        self._active_green = False     # highlight vert (vue moteur en temporel)
-        self._frozen = False           # vue figee (vue i-N en temporel)
+        self._active_green = False  # highlight vert (vue moteur en temporel)
+        self._frozen = False  # vue figee (vue i-N en temporel)
         self._frozen_label = None
 
         self.banner = QtWidgets.QLabel(" [1] — vide —")
         self.banner.setStyleSheet(
-            "background:#141418; color:#5aafff; font-size:10px; padding:1px 4px;")
+            "background:#141418; color:#5aafff; font-size:10px; padding:1px 4px;"
+        )
         self.banner.setToolTip(
             "Clic : sélectionner cette vue (outils TI + histogramme)\n"
             "Double-clic : plein écran / retour\n"
-            "Clic droit glissé : échanger avec une autre vue")
+            "Clic droit glissé : échanger avec une autre vue"
+        )
 
         self.convert_btn = QtWidgets.QToolButton()
-        self.convert_btn.setText("⇄ Convertir")
+        self.convert_btn.setText("Convertir")
+        self.convert_btn.setIcon(icons.icon("swap", size=14))
+        self.convert_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.convert_btn.setToolTip(
-            "Convertir cette vue vers un autre format\n"
-            "(avec calques + contraste gravés si coché)")
+            "Convertir cette vue vers un autre format\n(avec calques + contraste gravés si coché)"
+        )
         self.convert_btn.setFixedHeight(22)
         self.convert_btn.setFocusPolicy(Qt.NoFocus)
         self.convert_btn.setStyleSheet(
             "QToolButton{background:#1c1c22;color:#ddd;border:1px solid #444;"
             "border-radius:3px;font-size:11px;padding:2px 8px;}"
-            "QToolButton:hover{border-color:#5aafff;color:#fff;}")
+            "QToolButton:hover{border-color:#5aafff;color:#fff;}"
+        )
         self.convert_btn.clicked.connect(lambda: self.convertClicked.emit(self.pos_idx))
 
         self.banner_row = QtWidgets.QWidget()
@@ -176,6 +253,16 @@ class BaseViewFrame(QtWidgets.QFrame):
         _brow.addWidget(self.convert_btn)
 
         self.mini = MiniBar()
+        self.info_bar = InfoBar()
+        self.info_bar.setVisible(False)
+
+    # -- ligne d'infos (fichier, taille, type, fps...) --
+    def set_frame_info(self, text):
+        self.info_bar.set_info(text)
+        self.info_bar.setVisible(BaseViewFrame.info_bar_enabled and bool(text))
+
+    def apply_info_bar_enabled(self):
+        self.info_bar.setVisible(BaseViewFrame.info_bar_enabled and bool(self.info_bar.full_text()))
 
     # -- bandeau / position --
     def set_name(self, name):
@@ -188,15 +275,14 @@ class BaseViewFrame(QtWidgets.QFrame):
 
     def _refresh_banner(self):
         if self._frozen:
-            return   # le bandeau figé (Past Frame) prime
+            return  # le bandeau figé (Past Frame) prime
         self.banner.setText(f" [{self.pos_idx + 1}] {self._name or '— vide —'}")
 
     def _apply_style(self):
         if self._frozen:
             self.setStyleSheet(self._SS_FROZEN)
         elif self._is_active:
-            self.setStyleSheet(self._SS_ACTIVE_GREEN if self._active_green
-                               else self._SS_ACTIVE)
+            self.setStyleSheet(self._SS_ACTIVE_GREEN if self._active_green else self._SS_ACTIVE)
         else:
             self.setStyleSheet(self._SS_IDLE)
 
@@ -222,11 +308,13 @@ class BaseViewFrame(QtWidgets.QFrame):
             self.banner.setText(f" {self._frozen_label}")
             self.banner.setStyleSheet(
                 "background:#1f4a2a; color:#eafff0; font-weight:bold; "
-                "font-size:10px; padding:1px 4px;")
+                "font-size:10px; padding:1px 4px;"
+            )
         else:
             self._frozen_label = None
             self.banner.setStyleSheet(
-                "background:#141418; color:#5aafff; font-size:10px; padding:1px 4px;")
+                "background:#141418; color:#5aafff; font-size:10px; padding:1px 4px;"
+            )
             self._refresh_banner()
         self._apply_style()
 
@@ -244,10 +332,12 @@ class BaseViewFrame(QtWidgets.QFrame):
     def eventFilter(self, obj, ev):
         if obj is self._vid:
             t = ev.type()
-            if self._frozen and t in (QtCore.QEvent.MouseButtonPress,
-                                      QtCore.QEvent.MouseButtonDblClick,
-                                      QtCore.QEvent.MouseButtonRelease,
-                                      QtCore.QEvent.MouseMove):
+            if self._frozen and t in (
+                QtCore.QEvent.MouseButtonPress,
+                QtCore.QEvent.MouseButtonDblClick,
+                QtCore.QEvent.MouseButtonRelease,
+                QtCore.QEvent.MouseMove,
+            ):
                 # vue figée : on avale les interactions (pas d'activation, pas
                 # d'outil, pas d'échange) ; on garde juste le focus clavier.
                 if t == QtCore.QEvent.MouseButtonPress:
@@ -306,8 +396,7 @@ class BaseViewFrame(QtWidgets.QFrame):
     # -- drag & drop --
     def dragEnterEvent(self, e):
         md = e.mimeData()
-        if (md.hasFormat("application/x-fv-viewpos")
-                or md.hasUrls() or md.hasText()):
+        if md.hasFormat("application/x-fv-viewpos") or md.hasUrls() or md.hasText():
             e.acceptProposedAction()
 
     def dragMoveEvent(self, e):
@@ -315,7 +404,7 @@ class BaseViewFrame(QtWidgets.QFrame):
 
     def dropEvent(self, e):
         if self._frozen:
-            return   # la vue i-N est un miroir figé du flux moteur : pas de drop
+            return  # la vue i-N est un miroir figé du flux moteur : pas de drop
         md = e.mimeData()
         if md.hasFormat("application/x-fv-viewpos"):
             try:
@@ -339,12 +428,14 @@ class BaseViewFrame(QtWidgets.QFrame):
             self.folderDropped.emit(self.pos_idx, paths[0])
             e.acceptProposedAction()
             return
+
         def _is_overlay(p):
             # .sidecar = calque VISUIMG ; is_annotation_path = .ver / .txt isole /
             # dossier YOLO (un .txt par frame) -- CE dernier cas manquait ici
             # (present seulement dans MainWindow.dropEvent), ce qui faisait
             # traiter un dossier d'annotations YOLO comme un dossier media.
             return supports_path(p, "overlay_format") or is_annotation_path(p)
+
         # plusieurs .ver/.sidecar/dossiers YOLO d'un coup = plusieurs calques
         if all(_is_overlay(p) for p in paths):
             for p in paths:
@@ -381,37 +472,45 @@ class SatelliteView(BaseViewFrame):
 
         self.video = VideoWidget()
         self._watch_video(self.video)
+        # frame native affichee (avant rendu) : la sonde lit sa vraie valeur
+        self._probe_raw = None
+        self.video.hovered.connect(self._on_probe)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self.banner_row)
         lay.addWidget(self.video, 1)
+        lay.addWidget(self.info_bar)
         lay.addWidget(self.mini)
 
         # navInteracted : touche a la main play/precedent/suivant de CETTE
         # vue -> les fleches clavier gauche/droite doivent ensuite lui etre
         # dediees (voir MainWindow._on_view_nav_interacted / _kbd_target),
         # sans swap moteur (contrairement a un clic sur l'image elle-meme).
-        self.mini.first.connect(lambda: (self._goto(0),
-                                         self.navInteracted.emit(self.pos_idx)))
-        self.mini.prev.connect(lambda: (self._goto(self._cur - 1),
-                                        self.navInteracted.emit(self.pos_idx)))
-        self.mini.nxt.connect(lambda: (self._goto(self._cur + 1),
-                                       self.navInteracted.emit(self.pos_idx)))
+        self.mini.first.connect(lambda: (self._goto(0), self.navInteracted.emit(self.pos_idx)))
+        self.mini.prev.connect(
+            lambda: (self._goto(self._cur - 1), self.navInteracted.emit(self.pos_idx))
+        )
+        self.mini.nxt.connect(
+            lambda: (self._goto(self._cur + 1), self.navInteracted.emit(self.pos_idx))
+        )
         self.mini.last.connect(
-            lambda: (self._goto((self._source.count - 1) if self._source else 0),
-                     self.navInteracted.emit(self.pos_idx)))
+            lambda: (
+                self._goto((self._source.count - 1) if self._source else 0),
+                self.navInteracted.emit(self.pos_idx),
+            )
+        )
         self.mini.seek.connect(self._goto)
         # bouger le slider d'une vue non active doit l'activer (comme un clic
         # dessus) : activer PENDANT le glisser reparenterait le widget en
         # plein milieu du geste souris (perte du grab -> le slider « freeze »
         # et il faut recliquer). On laisse donc le glisser se terminer
         # normalement sur ce widget, et on n'active la vue qu'au relâchement.
-        self.mini.slider.sliderReleased.connect(
-            lambda: self.activated.emit(self.pos_idx))
-        self.mini.playToggled.connect(lambda on: (self._toggle_play(on),
-                                                   self.navInteracted.emit(self.pos_idx)))
+        self.mini.slider.sliderReleased.connect(lambda: self.activated.emit(self.pos_idx))
+        self.mini.playToggled.connect(
+            lambda on: (self._toggle_play(on), self.navInteracted.emit(self.pos_idx))
+        )
         self.mini.loopToggled.connect(self._set_loop)
         self.mini.b_loop.setChecked(True)
 
@@ -421,7 +520,7 @@ class SatelliteView(BaseViewFrame):
     # -- source / rendu --
     def load(self, source, lo, hi, lut_data, cube_lut, cube_size, full_range, filters):
         self._source = source
-        self._fps = getattr(source, 'fps', 25.0) or 25.0
+        self._fps = getattr(source, "fps", 25.0) or 25.0
         self._rp = (lo, hi, lut_data, cube_lut, cube_size, full_range, filters)
         self.set_name(source.name if source else "")
         self.mini.set_range(source.count if source else 0)
@@ -463,24 +562,26 @@ class SatelliteView(BaseViewFrame):
         raw = self._source.get(self._cur)
         if raw is None:
             return
+        if BaseViewFrame.info_bar_enabled:
+            self.set_frame_info(frame_info(self._source, self._cur, raw))
         if self._fetch_scale < 1.0:
             h, w = raw.shape[:2]
-            raw = cv2.resize(raw, (max(1, int(w * self._fetch_scale)),
-                                   max(1, int(h * self._fetch_scale))),
-                             interpolation=cv2.INTER_AREA)
+            raw = cv2.resize(
+                raw,
+                (max(1, int(w * self._fetch_scale)), max(1, int(h * self._fetch_scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+        self._probe_raw = raw
         lo, hi, lut_data, cube_lut, cube_size, full_range, filters = self._rp
-        bgr = render_frame(raw, lo, hi, lut_data, cube_lut, cube_size,
-                           full_range, filters)
+        bgr = render_frame(raw, lo, hi, lut_data, cube_lut, cube_size, full_range, filters)
         # annotations .ver : dessinées sur la vue (même inactive), calques visibles
-        vis_tracks = {L["key"] for L in self._layers
-                      if L["kind"] == "ver" and L["visible"]}
+        vis_tracks = {L["key"] for L in self._layers if L["kind"] == "ver" and L["visible"]}
         dets = self._annots.get(self._cur, [])
         if dets and vis_tracks:
             keep = [d for d in dets if (d[5] if len(d) > 5 else 0) in vis_tracks]
             if keep:
                 oh, ow = raw.shape[:2]
-                bgr = draw_annotation_boxes(bgr, keep, ow, oh, rotation=0,
-                                            scale=self._fetch_scale)
+                bgr = draw_annotation_boxes(bgr, keep, ow, oh, rotation=0, scale=self._fetch_scale)
         # overlay plugin "code" PAR VUE (comme les .ver) : cette vue affiche son
         # propre overlay depuis SES fichiers, meme non selectionnee / en lecture.
         if self.overlay_provider is not None and self._source is not None:
@@ -497,6 +598,9 @@ class SatelliteView(BaseViewFrame):
         if self.on_render:
             self.on_render()
 
+    def _on_probe(self, x, y):
+        self.video.set_probe_text(probe_text(self._probe_raw, x, y))
+
     def render_as_viewed(self, idx):
         """Rend la frame `idx` de CETTE vue satellite exactement comme
         affichée : LUT/contraste + boîtes .ver + calque SIDECAR (cochés). Pour
@@ -512,15 +616,13 @@ class SatelliteView(BaseViewFrame):
             return None
         if bgr.ndim == 2:
             bgr = cv2.cvtColor(bgr, cv2.COLOR_GRAY2BGR)
-        vis_tracks = {L["key"] for L in self._layers
-                      if L["kind"] == "ver" and L["visible"]}
+        vis_tracks = {L["key"] for L in self._layers if L["kind"] == "ver" and L["visible"]}
         dets = self._annots.get(idx, [])
         if dets and vis_tracks:
             keep = [d for d in dets if (d[5] if len(d) > 5 else 0) in vis_tracks]
             if keep:
                 oh, ow = raw.shape[:2]
-                bgr = draw_annotation_boxes(bgr, keep, ow, oh, rotation=0,
-                                            scale=self._fetch_scale)
+                bgr = draw_annotation_boxes(bgr, keep, ow, oh, rotation=0, scale=self._fetch_scale)
         sidecar_vis = any(L["kind"] == "sidecar" and L["visible"] for L in self._layers)
         if sidecar_vis:
             graphs = self._overlays.get(idx, [])
@@ -555,12 +657,21 @@ class SatelliteView(BaseViewFrame):
         return self._source is not None
 
     def export_state(self):
-        return dict(source=self._source, cur=self._cur, lo=self._rp[0],
-                    hi=self._rp[1], overlays=self._overlays, annots=self._annots,
-                    annot_path=self._annot_path, layers=list(self._layers),
-                    track_next=0, mode=self._hist_mode,
-                    zoom=self.video.get_view(), rec_on=self._rec_on,
-                    name=self._source.name if self._source else "")
+        return dict(
+            source=self._source,
+            cur=self._cur,
+            lo=self._rp[0],
+            hi=self._rp[1],
+            overlays=self._overlays,
+            annots=self._annots,
+            annot_path=self._annot_path,
+            layers=list(self._layers),
+            track_next=0,
+            mode=self._hist_mode,
+            zoom=self.video.get_view(),
+            rec_on=self._rec_on,
+            name=self._source.name if self._source else "",
+        )
 
     def import_state(self, st):
         self.mini.b_play.setChecked(False)
@@ -577,7 +688,7 @@ class SatelliteView(BaseViewFrame):
         rp[0], rp[1] = st.get("lo", 0), st.get("hi", 255)
         self._rp = tuple(rp)
         if self._source is not None:
-            self._fps = getattr(self._source, 'fps', 25.0) or 25.0
+            self._fps = getattr(self._source, "fps", 25.0) or 25.0
             self.set_name(self._source.name)
             self.mini.set_range(self._source.count)
             self._goto(min(self._cur, max(0, self._source.count - 1)))
@@ -590,6 +701,7 @@ class SatelliteView(BaseViewFrame):
         self._toggle_play(False)
         self._source = None
         self._last_bgr = None
+        self._probe_raw = None
         self._cur = 0
         self._overlays = {}
         self._annots = {}
@@ -600,6 +712,7 @@ class SatelliteView(BaseViewFrame):
         self.video.set_frame(None)
         self.video.reset_view()
         self.set_name("")
+        self.set_frame_info("")
         self.mini.set_range(0)
         self.mini.lbl.setText("─")
         if self.on_render:
@@ -609,11 +722,12 @@ class SatelliteView(BaseViewFrame):
 # ──────────────────────────── vue fusion (blend) ──────────────────
 class FusionView(QtWidgets.QFrame):
     """Bloc de superposition : blend alpha de deux rendus (gauche/droite)."""
-    alphaChanged   = QtCore.Signal(float)
-    extractClicked = QtCore.Signal()
-    selected       = QtCore.Signal()
 
-    _SS_IDLE   = "QFrame#fusv{border:2px solid #6b5a2a;background:#0e0e10;}"
+    alphaChanged = QtCore.Signal(float)
+    extractClicked = QtCore.Signal()
+    selected = QtCore.Signal()
+
+    _SS_IDLE = "QFrame#fusv{border:2px solid #6b5a2a;background:#0e0e10;}"
     _SS_ACTIVE = "QFrame#fusv{border:2px solid #ff9a3d;background:#0e0e10;}"
 
     def __init__(self, parent=None):
@@ -625,13 +739,15 @@ class FusionView(QtWidgets.QFrame):
         self._b = None
         self._alpha = 0.5
         self._mode = "alpha"
-        self._last_out = None      # rendu fusionné courant (pour la ROI)
+        self._last_out = None  # rendu fusionné courant (pour la ROI)
+        self._wipe_drag = False  # poignee du rideau A/B saisie a la souris
 
         self.video = VideoWidget()
         self.video.installEventFilter(self)
-        self._title = QtWidgets.QLabel(" ⧉ Fusion  (vue 1 ⊕ vue 2)")
+        self._title = QtWidgets.QLabel(" Fusion  (vue 1 + vue 2)")
         self._title.setStyleSheet(
-            "background:#141418; color:#ff9a3d; font-size:10px; padding:1px 3px;")
+            "background:#141418; color:#ff9a3d; font-size:10px; padding:1px 3px;"
+        )
         self._mode_combo = QtWidgets.QComboBox()
         self._mode_combo.setFocusPolicy(Qt.NoFocus)
         for _k, _lbl in BLEND_MODES:
@@ -639,50 +755,92 @@ class FusionView(QtWidgets.QFrame):
         self._mode_combo.setToolTip("Mode de fusion")
         self._mode_combo.setStyleSheet(
             "QComboBox{background:#241d10;color:#ff9a3d;border:1px solid #6b5a2a;"
-            "border-radius:2px;font-size:10px;padding:0 4px;}")
+            "border-radius:2px;font-size:10px;padding:0 4px;}"
+        )
         self._mode_combo.currentIndexChanged.connect(self._on_mode)
         self._sld = QtWidgets.QSlider(Qt.Horizontal)
-        self._sld.setRange(0, 100); self._sld.setValue(50)
+        self._sld.setRange(0, 100)
+        self._sld.setValue(50)
         self._sld.setFocusPolicy(Qt.NoFocus)
         self._sld.valueChanged.connect(self._on_slider)
         self._sld.setStyleSheet(
             "QSlider::groove:horizontal{height:5px;background:#3a2f1a;border-radius:2px;}"
             "QSlider::sub-page:horizontal{background:#ff9a3d;border-radius:2px;}"
             "QSlider::handle:horizontal{background:#ff9a3d;width:12px;margin:-4px 0;"
-            "border-radius:6px;}")
+            "border-radius:6px;}"
+        )
         self._albl = QtWidgets.QLabel("α 0.50")
         self._albl.setStyleSheet("color:#ff9a3d; font-size:10px; font-weight:bold;")
         self._albl.setFixedWidth(54)
 
-        self._extract_btn = QtWidgets.QPushButton("⤓ Extraire")
+        self._extract_btn = QtWidgets.QPushButton("Extraire")
+        self._extract_btn.setIcon(icons.icon("download", size=12, color="#ff9a3d"))
         self._extract_btn.setFixedHeight(18)
         self._extract_btn.setFocusPolicy(Qt.NoFocus)
         self._extract_btn.setToolTip(
             "Extraire le rendu fusionné (MP4 / PNG / SPECIALIZED) sur la plage IN→OUT\n"
-            "(ou toute la séquence si IN/OUT non définis)")
+            "(ou toute la séquence si IN/OUT non définis)"
+        )
         self._extract_btn.setStyleSheet(
             "QPushButton{background:#3a2f1a;color:#ff9a3d;border:1px solid #6b5a2a;"
             "border-radius:2px;font-size:10px;padding:0 6px;}"
-            "QPushButton:hover{border-color:#ff9a3d;}")
+            "QPushButton:hover{border-color:#ff9a3d;}"
+        )
         self._extract_btn.clicked.connect(self.extractClicked.emit)
 
         row = QtWidgets.QHBoxLayout()
-        row.setContentsMargins(4, 0, 4, 0); row.setSpacing(4)
+        row.setContentsMargins(4, 0, 4, 0)
+        row.setSpacing(4)
         row.addWidget(self._mode_combo)
         row.addWidget(self._sld, 1)
         row.addWidget(self._albl)
         row.addWidget(self._extract_btn)
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
         lay.addWidget(self._title)
         lay.addWidget(self.video, 1)
         lay.addLayout(row)
 
+    # Distance (px ecran) a laquelle un clic attrape la poignee du rideau ;
+    # ailleurs le clic garde son role normal (ROI sur le rendu fusionne).
+    _WIPE_GRAB_PX = 14
+
+    def _wipe_handle_x(self):
+        """Abscisse ecran de la poignee (None hors mode rideau / sans image)."""
+        if self._mode != "wipe" or self._last_out is None:
+            return None
+        self.video._geom()
+        return self.video._w(self._alpha * self._last_out.shape[1], 0).x()
+
+    def _drag_wipe_to(self, pos):
+        if self._last_out is None:
+            return
+        ix, _iy = self.video._img_at(pos)
+        self.set_alpha(ix / max(1, self._last_out.shape[1]))
+        self.alphaChanged.emit(self._alpha)
+
     def eventFilter(self, obj, ev):
-        if (obj is self.video and ev.type() == QtCore.QEvent.MouseButtonPress
-                and ev.button() == Qt.LeftButton):
-            self.selected.emit()
+        if obj is self.video:
+            t = ev.type()
+            if t == QtCore.QEvent.MouseButtonPress and ev.button() == Qt.LeftButton:
+                self.selected.emit()
+                hx = self._wipe_handle_x()
+                if hx is not None and abs(ev.position().x() - hx) <= self._WIPE_GRAB_PX:
+                    self._wipe_drag = True
+                    self._drag_wipe_to(ev.position())
+                    return True
+            elif t == QtCore.QEvent.MouseMove:
+                if self._wipe_drag:
+                    self._drag_wipe_to(ev.position())
+                    return True
+                hx = self._wipe_handle_x()
+                near = hx is not None and abs(ev.position().x() - hx) <= self._WIPE_GRAB_PX
+                self.video.setCursor(Qt.SplitHCursor if near else Qt.ArrowCursor)
+            elif t == QtCore.QEvent.MouseButtonRelease and self._wipe_drag:
+                self._wipe_drag = False
+                return True
         return super().eventFilter(obj, ev)
 
     def set_active(self, on):
@@ -696,8 +854,10 @@ class FusionView(QtWidgets.QFrame):
 
     def _on_mode(self, _=None):
         self._mode = self._mode_combo.currentData()
-        # α n'a de sens que pour le mode alpha
-        on = self._mode == "alpha"
+        # le curseur pilote le melange (alpha, additions) ou la position du
+        # rideau ; il ne sert a rien pour les modes sans parametre
+        on = self._mode in ("alpha", "add_ab", "add_ba", "wipe")
+        self.video.setCursor(Qt.ArrowCursor)
         self._sld.setEnabled(on)
         self._albl.setEnabled(on)
         self._render()
@@ -735,13 +895,27 @@ class FusionView(QtWidgets.QFrame):
             return
         if a is None:
             self._last_out = b
-            self.video.set_frame(b); return
+            self.video.set_frame(b)
+            return
         if b is None:
             self._last_out = a
-            self.video.set_frame(a); return
+            self.video.set_frame(a)
+            return
         out = blend_frames(a, b, self._alpha, self._mode)
         self._last_out = out
+        if self._mode == "wipe":
+            # poignee dessinee sur une copie : _last_out (ROI/export) reste propre
+            shown = out.copy()
+            h, w = shown.shape[:2]
+            cut = int(round(self._alpha * w))
+            cv2.line(shown, (cut, 0), (cut, h - 1), (61, 154, 255), max(1, w // 400))
+            cy, r = h // 2, max(6, min(h, w) // 40)
+            cv2.circle(shown, (cut, cy), r, (61, 154, 255), -1, cv2.LINE_AA)
+            self.video.set_frame(shown)
+            return
         self.video.set_frame(out)
+
+
 class PrimaryFrame(BaseViewFrame):
     """Vue rendue par le moteur de MainWindow. Visuellement identique aux autres :
     même bandeau, même mini-barre. Sa mini-barre pilote le moteur."""
@@ -755,6 +929,7 @@ class PrimaryFrame(BaseViewFrame):
         lay.setSpacing(0)
         lay.addWidget(self.banner_row)
         lay.addWidget(self.video, 1)
+        lay.addWidget(self.info_bar)
         lay.addWidget(self.mini)
 
 
@@ -807,10 +982,12 @@ class MultiViewOverlay(QtWidgets.QWidget):
                 # view_rect() renvoie un QRectF pour conserver la precision du
                 # mapping image. QFontMetrics.boundingRect() renvoie un QRect,
                 # dont moveTopLeft exige strictement un QPoint sous PySide6 6.8.
-                text_rect.moveTopLeft(QtCore.QPoint(
-                    int(round(rect.left())) + 12,
-                    int(round(rect.top())) + 12,
-                ))
+                text_rect.moveTopLeft(
+                    QtCore.QPoint(
+                        int(round(rect.left())) + 12,
+                        int(round(rect.top())) + 12,
+                    )
+                )
                 background = g.get("background", (20, 20, 25, 205))
                 p.setPen(Qt.NoPen)
                 p.setBrush(QtGui.QColor(*background))
@@ -829,8 +1006,9 @@ class MultiViewOverlay(QtWidgets.QWidget):
                 # sinon (zoom/pan hors cadre) le point projete tomberait dans une
                 # autre vue et le trait partirait n'importe ou.
                 ra, rb = self._canvas.view_rect(va), self._canvas.view_rect(vb)
-                if (ra is not None and not ra.contains(a)) or \
-                   (rb is not None and not rb.contains(b)):
+                if (ra is not None and not ra.contains(a)) or (
+                    rb is not None and not rb.contains(b)
+                ):
                     continue
                 p.drawLine(a, b)
                 p.setBrush(col)
@@ -840,7 +1018,7 @@ class MultiViewOverlay(QtWidgets.QWidget):
                 continue
             view = int(g.get("view", 0))
             pts = []
-            for (x, y) in g.get("points", []):
+            for x, y in g.get("points", []):
                 q = self._canvas.map_image_point(view, x, y)
                 if q is not None:
                     pts.append(q)
@@ -893,29 +1071,30 @@ class MultiViewOverlay(QtWidgets.QWidget):
 class SplitCanvas(QtWidgets.QWidget):
     """Grille de vues toutes équivalentes. La vue ACTIVE est celle rendue par le
     moteur (PrimaryFrame) ; elle se déplace à la position sélectionnée."""
-    activateRequested  = QtCore.Signal(int)        # position à activer
-    swapRequested      = QtCore.Signal(int, int)
-    mediaDropped       = QtCore.Signal(int, list)
-    overlayDropped     = QtCore.Signal(int, str)
-    folderDropped      = QtCore.Signal(int, str)
-    doubled            = QtCore.Signal(int)
+
+    activateRequested = QtCore.Signal(int)  # position à activer
+    swapRequested = QtCore.Signal(int, int)
+    mediaDropped = QtCore.Signal(int, list)
+    overlayDropped = QtCore.Signal(int, str)
+    folderDropped = QtCore.Signal(int, str)
+    doubled = QtCore.Signal(int)
     fusionAlphaChanged = QtCore.Signal(float)
-    fusionRoiChanged   = QtCore.Signal(int, int, int, int)
+    fusionRoiChanged = QtCore.Signal(int, int, int, int)
     fusionExtractRequested = QtCore.Signal()
-    fusionSelected     = QtCore.Signal()
-    convertClicked     = QtCore.Signal(int)        # bouton "Convertir" d'une vue
-    navInteracted      = QtCore.Signal(int)        # play/precedent/suivant d'une vue touche a la main
-    satelliteRendered  = QtCore.Signal()           # une vue satellite vient de se re-rendre
-    viewFrameChanged   = QtCore.Signal(int, int)   # navigation directe d'une vue satellite
+    fusionSelected = QtCore.Signal()
+    convertClicked = QtCore.Signal(int)  # bouton "Convertir" d'une vue
+    navInteracted = QtCore.Signal(int)  # play/precedent/suivant d'une vue touche a la main
+    satelliteRendered = QtCore.Signal()  # une vue satellite vient de se re-rendre
+    viewFrameChanged = QtCore.Signal(int, int)  # navigation directe d'une vue satellite
 
     MODES = {
-        "1":        (1, 1, 1),
-        "h2":       (1, 2, 2),
-        "v2":       (2, 1, 2),
-        "h3":       (1, 3, 3),
-        "q4":       (2, 2, 4),
-        "fusion":   (2, 2, 2),
-        "temporal": (1, 2, 2),   # meme flux : gauche = i-N (satellite), droite = i (moteur)
+        "1": (1, 1, 1),
+        "h2": (1, 2, 2),
+        "v2": (2, 1, 2),
+        "h3": (1, 3, 3),
+        "q4": (2, 2, 4),
+        "fusion": (2, 2, 2),
+        "temporal": (1, 2, 2),  # meme flux : gauche = i-N (satellite), droite = i (moteur)
     }
 
     def __init__(self, primary_frame: PrimaryFrame, parent=None):
@@ -941,7 +1120,7 @@ class SplitCanvas(QtWidgets.QWidget):
         # flotte au-dessus de la grille, transparente aux clics.
         self._mv_overlay = MultiViewOverlay(self)
         self._mv_overlay.setGeometry(self.rect())
-        self._overlay_wired = set()   # ids des videos deja reliees au repaint overlay
+        self._overlay_wired = set()  # ids des videos deja reliees au repaint overlay
         self._relayout()
 
     def resizeEvent(self, e):
@@ -989,7 +1168,7 @@ class SplitCanvas(QtWidgets.QWidget):
             return None
         try:
             v._geom()
-            local = v._w(float(x), float(y))     # coords locales a la VideoWidget
+            local = v._w(float(x), float(y))  # coords locales a la VideoWidget
             return v.mapTo(self, local.toPoint())
         except Exception:
             return None
@@ -1003,8 +1182,7 @@ class SplitCanvas(QtWidgets.QWidget):
             return None
         try:
             tl = v.mapTo(self, QtCore.QPoint(0, 0))
-            return QtCore.QRectF(float(tl.x()), float(tl.y()),
-                                 float(v.width()), float(v.height()))
+            return QtCore.QRectF(float(tl.x()), float(tl.y()), float(v.width()), float(v.height()))
         except Exception:
             return None
 
@@ -1058,7 +1236,7 @@ class SplitCanvas(QtWidgets.QWidget):
         if mode == "fusion":
             self._ensure_fusion()
         was_temporal = self._temporal
-        self._temporal = (mode == "temporal")
+        self._temporal = mode == "temporal"
         self._mode = mode
         if self._temporal:
             # roles figes : slot 0 = satellite gauche (i-N), slot 1 = moteur (i).
@@ -1068,14 +1246,14 @@ class SplitCanvas(QtWidgets.QWidget):
         else:
             self._temporal_sat = None
             # la vue principale revient en position 0 au changement de disposition
-            self._order = [self._primary] + self._sats[:n - 1]
+            self._order = [self._primary] + self._sats[: n - 1]
             self._active_pos = 0
         self._fusion_active = False
         self._relayout()
         # apparence des roles temporels (apres relayout : les widgets sont poses)
         if self._temporal:
             self._temporal_sat.set_frozen(True, "Past Frame i-N")
-            self._primary.set_active_green(True)   # vue droite (i) = moteur = vert
+            self._primary.set_active_green(True)  # vue droite (i) = moteur = vert
         else:
             self._primary.set_active_green(False)
             if was_temporal and self._sats:
@@ -1102,8 +1280,10 @@ class SplitCanvas(QtWidgets.QWidget):
             self._grid.addWidget(self._order[1], 0, 1)
             self._grid.addWidget(self._fusion, 1, 0, 1, 2)
             self._fusion.show()
-            self._grid.setColumnStretch(0, 1); self._grid.setColumnStretch(1, 1)
-            self._grid.setRowStretch(0, 1); self._grid.setRowStretch(1, 1)
+            self._grid.setColumnStretch(0, 1)
+            self._grid.setColumnStretch(1, 1)
+            self._grid.setRowStretch(0, 1)
+            self._grid.setRowStretch(1, 1)
         else:
             if self._fusion is not None:
                 self._fusion.hide()
@@ -1167,7 +1347,7 @@ class SplitCanvas(QtWidgets.QWidget):
         """Place la vue principale (moteur) à la position pos, en échangeant
         le widget qui s'y trouve avec l'ancienne position."""
         if self._temporal:
-            return   # roles figes en mode temporel
+            return  # roles figes en mode temporel
         if pos == self._active_pos or pos >= len(self._order):
             return
         a, b = self._active_pos, pos
@@ -1177,7 +1357,7 @@ class SplitCanvas(QtWidgets.QWidget):
 
     def swap_positions(self, p1, p2):
         if self._temporal:
-            return   # roles figes en mode temporel
+            return  # roles figes en mode temporel
         if p1 == p2 or p1 >= len(self._order) or p2 >= len(self._order):
             return
         self._order[p1], self._order[p2] = self._order[p2], self._order[p1]
@@ -1248,29 +1428,34 @@ class SplitCanvas(QtWidgets.QWidget):
     def _refresh_fusion(self):
         if self._mode != "fusion" or self._fusion is None or len(self._order) < 2:
             return
-        self._fusion.set_frames(self._frame_of(self._order[0]),
-                                self._frame_of(self._order[1]))
+        self._fusion.set_frames(self._frame_of(self._order[0]), self._frame_of(self._order[1]))
 
-    def update_sat_render(self, lut_data, cube_lut, cube_size,
-                          full_range, filters):
+    def update_sat_render(self, lut_data, cube_lut, cube_size, full_range, filters):
         """Propage les réglages GLOBAUX (LUT / filtres) aux autres vues.
         Leur fenêtre lo/hi n'est PAS touchée."""
         for sv in self.satellites():
             if sv.has_source():
-                sv.update_render(lut_data, cube_lut, cube_size,
-                                 full_range, filters)
+                sv.update_render(lut_data, cube_lut, cube_size, full_range, filters)
         self._refresh_fusion()
 
     def set_fetch_scale(self, s):
         for sv in self._sats:
             sv.set_fetch_scale(s)
+
+    def set_info_bar_enabled(self, on):
+        BaseViewFrame.info_bar_enabled = bool(on)
+        for w in [self._primary, *self._sats]:
+            w.apply_info_bar_enabled()
+
+
 class FrameSlider(QtWidgets.QSlider):
     """QSlider avec surbrillance rouge de la zone d'extraction IN/OUT."""
+
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self._in = -1
         self._out = -1
-        self._segments = []   # [(in, out)] : morceaux du splitting (vert)
+        self._segments = []  # [(in, out)] : morceaux du splitting (vert)
 
     def set_extract_zone(self, in_f, out_f):
         self._in = in_f
@@ -1294,18 +1479,19 @@ class FrameSlider(QtWidgets.QSlider):
         if self._segments:
             p = QtGui.QPainter(self)
             p.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            f = p.font(); f.setPixelSize(9); f.setBold(True); p.setFont(f)
+            f = p.font()
+            f.setPixelSize(9)
+            f.setBold(True)
+            p.setFont(f)
             for i, seg in enumerate(self._segments, 1):
                 s, en = seg[0], seg[1]
                 if s < 0 or en < s:
                     continue
                 gx1 = mg + int((s - self.minimum()) / total * gw)
                 gx2 = mg + int((en - self.minimum()) / total * gw)
-                p.fillRect(gx1, 1, max(2, gx2 - gx1), h - 2,
-                           QtGui.QColor(40, 200, 90, 110))
+                p.fillRect(gx1, 1, max(2, gx2 - gx1), h - 2, QtGui.QColor(40, 200, 90, 110))
                 p.setPen(QtGui.QColor(190, 255, 210))
-                p.drawText(QtCore.QRectF(gx1, 0, max(10, gx2 - gx1), h),
-                           Qt.AlignCenter, str(i))
+                p.drawText(QtCore.QRectF(gx1, 0, max(10, gx2 - gx1), h), Qt.AlignCenter, str(i))
             p.end()
         if self._in >= 0 and self._out > self._in:
             x1 = mg + int((self._in - self.minimum()) / total * gw)
@@ -1316,8 +1502,11 @@ class FrameSlider(QtWidgets.QSlider):
             p.end()
         # étoiles rouges : marquent visuellement les frames IN et OUT posées,
         # même si une seule des deux est encore définie (avant la zone rouge).
-        pts = [f for f in (self._in, self._out)
-               if f is not None and f >= self.minimum() and f <= self.maximum()]
+        pts = [
+            f
+            for f in (self._in, self._out)
+            if f is not None and f >= self.minimum() and f <= self.maximum()
+        ]
         if pts:
             p = QtGui.QPainter(self)
             p.setRenderHint(QtGui.QPainter.Antialiasing, True)

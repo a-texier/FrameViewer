@@ -38,7 +38,8 @@ def test_unicode_image_roundtrip_and_directory_scan(tmp_path):
     loaded = imread_unicode(second, cv2.IMREAD_UNCHANGED)
     assert np.array_equal(loaded, image + 1)
     assert [p.split("\\")[-1] for p in list_images(tmp_path)] == [
-        "image_2_accent.png", "image_10.png"
+        "image_2_accent.png",
+        "image_10.png",
     ]
     assert list_files(tmp_path, {".bin"}) == [str(tmp_path / "ignore.bin")]
 
@@ -125,7 +126,9 @@ def test_render_frame_color_gray_colormap_and_filter_paths():
     assert np.array_equal(inverted, 255 - gray)
 
 
-@pytest.mark.parametrize("mode", ["alpha", "add_ab", "add_ba", "diff", "damier", "max", "mult", "wipe"])
+@pytest.mark.parametrize(
+    "mode", ["alpha", "add_ab", "add_ba", "diff", "damier", "max", "mult", "wipe"]
+)
 def test_all_blend_modes_have_stable_shape_and_dtype(mode):
     a = np.full((24, 32, 3), 30, np.uint8)
     b = np.full((12, 16), 180, np.uint8)
@@ -163,9 +166,7 @@ def test_patch_composition_places_each_corner(corner):
 
 def test_signed_difference_lut_maps_negative_red_zero_black_positive_blue():
     signed = np.array([[-65535.0, 0.0, 65535.0]], dtype=np.float32)
-    rendered = render_frame(
-        signed, -65535, 65535, SIGNED_DIFF_LUT,
-        full_range=(-65535, 65535))
+    rendered = render_frame(signed, -65535, 65535, SIGNED_DIFF_LUT, full_range=(-65535, 65535))
     negative, zero, positive = rendered[0]
     assert int(negative[2]) > int(negative[0])
     assert np.array_equal(zero, [0, 0, 0])

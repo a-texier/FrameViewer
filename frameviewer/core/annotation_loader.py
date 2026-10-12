@@ -5,6 +5,7 @@ Merged YOLO files use one ``frame_id class cx cy width height`` row per box.
 YOLO folders contain one naturally ordered text file per annotated frame.
 All readers return ``(class, x1, y1, x2, y2, track_id, labels)`` tuples.
 """
+
 import glob
 import os
 import re
@@ -43,7 +44,7 @@ def scan_dropped_folder(folder):
     """
     images, txts, vers = [], [], []
     try:
-        with os.scandir(folder) as it:   # One enumeration, no per-file stat.
+        with os.scandir(folder) as it:  # One enumeration, no per-file stat.
             for e in it:
                 p = dirent_image_path(e)
                 if p:
@@ -59,12 +60,44 @@ def scan_dropped_folder(folder):
     return natural_sort(images), txts, vers
 
 
+def pair_stems_to_positions(by_stem, image_stems=None):
+    """Map annotations keyed by label stem to frame positions.
+
+    1. by name: label stem == image stem (case-insensitive);
+    2. when no stem matches an image, by natural order (1st label -> frame 0).
+    Returns ``(mapping, named_count)``; ``named_count`` is 0 for the order
+    fallback. Order pairing stops at the image count when images are given.
+    """
+    image_stems = list(image_stems or [])
+    by_lower = {}
+    for position, stem in enumerate(image_stems):
+        by_lower.setdefault(str(stem).lower(), position)  # first one wins
+    matched = {}
+    named = 0
+    for stem, dets in by_stem.items():
+        position = by_lower.get(str(stem).lower())
+        if position is not None:
+            matched.setdefault(position, []).extend(dets)
+            named += 1
+    if named:
+        return matched, named
+    ordered = {}
+    for position, stem in enumerate(natural_sort([str(k) for k in by_stem])):
+        if image_stems and position >= len(image_stems):
+            break
+        ordered.setdefault(position, []).extend(by_stem[stem])
+    return ordered, 0
+
+
 def load_annotations(annotation_file, image_width=0, image_height=0, default_track=0):
     """Detect the annotation layout and load it.
 
-    Returns ``dict[int, list[tuple]]``:
+    Returns ``dict[int, list[tuple]]`` for .ver and merged YOLO files:
         frame_idx -> [(cls, x1, y1, x2, y2, track_id, labels), ...]
         labels contains optional class metadata.
+    A YOLO *folder* is keyed by label-file stem (str) instead, because a
+    stem can only be placed on a frame once the image names are known; see
+    ``pair_stems_to_positions``.
 
     ``default_track`` is used when the source row has no track identifier.
     """
@@ -112,16 +145,13 @@ def _load_ver(path, default_track=0):
                 cls_str = cols[7].lower() if len(cols) > 7 else "unknown"
                 cls = _VER_CLASS_MAP.get(cls_str, 4)
                 labels = tuple(
-                    cols[i] for i in range(7, len(cols))
-                    if cols[i].lower() not in _EMPTY_LABEL
+                    cols[i] for i in range(7, len(cols)) if cols[i].lower() not in _EMPTY_LABEL
                 )
             else:
-                track_id = default_track      # Short layout: one file per track.
+                track_id = default_track  # Short layout: one file per track.
                 cls = 4
                 labels = ()
-            annots.setdefault(frame_id, []).append(
-                (cls, x1, y1, x2, y2, track_id, labels)
-            )
+            annots.setdefault(frame_id, []).append((cls, x1, y1, x2, y2, track_id, labels))
     return annots
 
 
@@ -130,7 +160,9 @@ def _load_class_names(folder):
     path = os.path.join(folder, "classes.txt")
     try:
         with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
-            return [line.strip() for line in f if line.strip() and not line.lstrip().startswith("#")]
+            return [
+                line.strip() for line in f if line.strip() and not line.lstrip().startswith("#")
+            ]
     except OSError:
         return []
 
@@ -157,13 +189,13 @@ def _load_yolo_merged(path, img_w, img_h):
                 frame_id = int(cols[0])
                 cls = int(cols[1])
                 x1, y1, x2, y2 = _yolo_norm_to_pixel(
-                    float(cols[2]), float(cols[3]),
-                    float(cols[4]), float(cols[5]),
-                    img_w, img_h)
+                    float(cols[2]), float(cols[3]), float(cols[4]), float(cols[5]), img_w, img_h
+                )
             except (ValueError, IndexError):
                 continue
             annots.setdefault(frame_id, []).append(
-                (cls, x1, y1, x2, y2, 0, _class_labels(cls, class_names)))
+                (cls, x1, y1, x2, y2, 0, _class_labels(cls, class_names))
+            )
     return annots
 
 
@@ -192,13 +224,11 @@ def _read_yolo_txt(args):
                 try:
                     cls = int(cols[0])
                     x1, y1, x2, y2 = _yolo_norm_to_pixel(
-                        float(cols[1]), float(cols[2]),
-                        float(cols[3]), float(cols[4]),
-                        img_w, img_h)
+                        float(cols[1]), float(cols[2]), float(cols[3]), float(cols[4]), img_w, img_h
+                    )
                 except (ValueError, IndexError):
                     continue
-                dets.append(
-                    (cls, x1, y1, x2, y2, 0, _class_labels(cls, class_names)))
+                dets.append((cls, x1, y1, x2, y2, 0, _class_labels(cls, class_names)))
     except OSError:
         pass
     # Use the complete label stem as the key. MainWindow first pairs labels and
@@ -223,7 +253,7 @@ def _load_yolo_folder(folder, img_w, img_h):
     txts = natural_sort(glob.glob(os.path.join(folder, "*.txt")))
     txts = [path for path in txts if os.path.basename(path).lower() != "classes.txt"]
     class_names = _load_class_names(folder)
-    annots = {}   # Label stem -> detection rows.
+    annots = {}  # Label stem -> detection rows.
     for txt_path in txts:
         stem, dets = _read_yolo_txt((txt_path, img_w, img_h, class_names))
         if not dets:

@@ -16,6 +16,7 @@ Example from the directory containing the ``frameviewer`` package:
 
 Outputs are written under the frame directory's ``out`` folder or ``--out``.
 """
+
 import argparse
 import glob
 import os
@@ -96,6 +97,7 @@ def _to_bgr8(img):
     """Normalize grayscale/BGR/BGRA arrays to uint8 BGR."""
     import cv2
     import numpy as np
+
     if img.dtype != np.uint8:
         mx = float(img.max()) if img.size else 1.0
         scale = 255.0 / mx if mx > 0 else 1.0
@@ -110,6 +112,7 @@ def _to_bgr8(img):
 def _composite(base_bgr, overlay_bgra):
     """Alpha-composite a BGRA overlay over a BGR base."""
     import numpy as np
+
     base = _to_bgr8(base_bgr)
     h = min(base.shape[0], overlay_bgra.shape[0])
     w = min(base.shape[1], overlay_bgra.shape[1])
@@ -122,13 +125,17 @@ def _composite(base_bgr, overlay_bgra):
 
 def _load_frame(args):
     import numpy as np
+
     if args.npy:
         if not os.path.isfile(args.npy):
-            raise SystemExit(f"Frame introuvable : {args.npy}\n"
-                             "Exporte-la depuis l'app (Console > Exporter frame).")
+            raise SystemExit(
+                f"Frame introuvable : {args.npy}\n"
+                "Exporte-la depuis l'app (Console > Exporter frame)."
+            )
         return np.load(args.npy)
     if args.image:
         import cv2
+
         img = cv2.imread(args.image, cv2.IMREAD_UNCHANGED)
         if img is None:
             raise SystemExit(f"Image illisible : {args.image}")
@@ -138,7 +145,8 @@ def _load_frame(args):
 
 def _resolve_plugin_folder(name):
     """Resolve a plugin path, package name, or identifier from known roots."""
-    from frameviewer.plugins.loader import (PLUGIN_FOLDER_PREFIX, plugins_roots)
+    from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX, plugins_roots
+
     if os.path.isdir(name) and os.path.isfile(os.path.join(name, "plugin.py")):
         return os.path.abspath(name)
     candidates = [name]
@@ -155,6 +163,7 @@ def _resolve_plugin_folder(name):
 def _load_plugin_instance(folder):
     """Compile plugin.py directly and return its instance and manifest."""
     from frameviewer.plugins import manifest as _manifest
+
     mod_path = os.path.join(folder, "plugin.py")
     with open(mod_path, "r", encoding="utf-8") as f:
         src = f.read()
@@ -180,14 +189,16 @@ def _debug_dir(folder):
 def _deployed_plugin_roots():
     """Return deployed plugin roots as seen by the installed application."""
     from frameviewer.plugins.loader import plugins_root, user_plugins_dir
+
     roots = [(user_plugins_dir(), "utilisateur")]
     if getattr(sys, "frozen", False):
-        roots.append((os.path.join(os.path.dirname(sys.executable), "plugins"),
-                      "a cote de l'exe"))
+        roots.append((os.path.join(os.path.dirname(sys.executable), "plugins"), "a cote de l'exe"))
     else:
         base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        for rel in (os.path.join("output_compacte", "exe", "plugins"),
-                    os.path.join("output_with_folder", "app", "FrameViewer", "plugins")):
+        for rel in (
+            os.path.join("output_compacte", "exe", "plugins"),
+            os.path.join("output_with_folder", "app", "FrameViewer", "plugins"),
+        ):
             roots.append((os.path.join(base, rel), "a cote de l'exe"))
     if not any(os.path.isdir(r) for r, _ in roots):
         roots.append((plugins_root(), "sources (repli)"))
@@ -197,15 +208,18 @@ def _deployed_plugin_roots():
 def _list_plugins_ordered():
     """List deployed plugin folders in priority order without duplicates."""
     from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX
+
     out, seen = [], set()
     for root, tag in _deployed_plugin_roots():
         if not os.path.isdir(root):
             continue
         for entry in sorted(os.listdir(root)):
             folder = os.path.join(root, entry)
-            if (entry.startswith(PLUGIN_FOLDER_PREFIX)
-                    and os.path.isfile(os.path.join(folder, "plugin.py"))
-                    and entry not in seen):
+            if (
+                entry.startswith(PLUGIN_FOLDER_PREFIX)
+                and os.path.isfile(os.path.join(folder, "plugin.py"))
+                and entry not in seen
+            ):
                 seen.add(entry)
                 out.append((f"{entry}  [{tag}]", folder))
     return out
@@ -225,7 +239,7 @@ def _pick(title, items):
         raw = input("Choix [1] : ").strip() or "1"
         idx = int(raw)
     except (EOFError, ValueError):
-        raise SystemExit("Choix invalide.")
+        raise SystemExit("Choix invalide.") from None
     if not (1 <= idx <= len(items)):
         raise SystemExit("Choix hors bornes.")
     return items[idx - 1][1]
@@ -236,6 +250,7 @@ def _frame_index_from_name(path):
     if not path:
         return None
     import re
+
     m = re.search(r"frame(\d+)", os.path.basename(path))
     return int(m.group(1)) if m else None
 
@@ -272,20 +287,33 @@ def _parse_inputs(pairs):
 # --------------------------------------------------------------------------
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Debugger un plugin FrameViewer hors interface (frame -> sortie).")
-    parser.add_argument("--plugin",
-                        help="dossier plugins_xxx (nom, id ou chemin) ; "
-                             "omis -> choix interactif (user d'abord, puis exe)")
+        description="Debugger un plugin FrameViewer hors interface (frame -> sortie)."
+    )
+    parser.add_argument(
+        "--plugin",
+        help="dossier plugins_xxx (nom, id ou chemin) ; "
+        "omis -> choix interactif (user d'abord, puis exe)",
+    )
     parser.add_argument("--npy", help="frame exportee depuis l'app (.npy)")
     parser.add_argument("--image", help="image quelconque a utiliser comme frame")
-    parser.add_argument("--input", action="append", default=[], metavar="nom=chemin",
-                        help="fichier d'entree du plugin (repetable) -> self.<nom>")
-    parser.add_argument("--frame-index", type=int, default=None,
-                        help="numero de frame passe aux hooks ; si omis, deduit du "
-                             "nom du .npy (frameNNNN.npy) sinon 0")
+    parser.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        metavar="nom=chemin",
+        help="fichier d'entree du plugin (repetable) -> self.<nom>",
+    )
+    parser.add_argument(
+        "--frame-index",
+        type=int,
+        default=None,
+        help="numero de frame passe aux hooks ; si omis, deduit du "
+        "nom du .npy (frameNNNN.npy) sinon 0",
+    )
     parser.add_argument("--out", help="dossier de sortie (defaut : <frame>/out)")
-    parser.add_argument("--site-packages",
-                        help="site-packages externe a ajouter a sys.path (pandas...)")
+    parser.add_argument(
+        "--site-packages", help="site-packages externe a ajouter a sys.path (pandas...)"
+    )
     args = parser.parse_args(argv)
 
     if args.site_packages and os.path.isdir(args.site_packages):
@@ -306,24 +334,28 @@ def main(argv=None):
         frame = _load_frame(args)
     else:
         import numpy as np
-        npys = [(os.path.basename(p), p)
-                for p in sorted(glob.glob(os.path.join(dbg, "*.npy")))]
+
+        npys = [(os.path.basename(p), p) for p in sorted(glob.glob(os.path.join(dbg, "*.npy")))]
         if npys:
             frame_src = _pick("Quelle frame ?", npys)
             frame = np.load(frame_src)
         else:
             # A neutral synthetic frame keeps no-input plugin debugging usable.
-            print(f"Aucune frame exportee dans {dbg}\n"
-                  "-> frame de test synthetique (gris 720x1280). Pour une vraie "
-                  "frame : app > Console > Exporter frame courante.")
+            print(
+                f"Aucune frame exportee dans {dbg}\n"
+                "-> frame de test synthetique (gris 720x1280). Pour une vraie "
+                "frame : app > Console > Exporter frame courante."
+            )
             frame = np.full((720, 1280, 3), 90, np.uint8)
             frame_src = None
     contract = _parse_inputs(args.input)
     # Offer discovered data files for declared inputs not supplied explicitly.
     if not args.input:
         from frameviewer.plugins import manifest as _manifest
-        declared = [i.get("name") for i in _manifest.load(folder).get("inputs", [])
-                    if i.get("name")]
+
+        declared = [
+            i.get("name") for i in _manifest.load(folder).get("inputs", []) if i.get("name")
+        ]
         if declared:
             cands = _input_candidates(folder)
             for name in declared:
@@ -345,6 +377,7 @@ def main(argv=None):
     import cv2
     from frameviewer.plugins.api import FrameViewerPlugin, PluginAPI
     from frameviewer.plugins.loader import environment_report
+
     print()
     print(environment_report())
     print()
@@ -359,7 +392,7 @@ def main(argv=None):
     inst, manifest = _load_plugin_instance(folder)
     pid = os.path.basename(folder)
     if pid.startswith(PLUGIN_FOLDER_PREFIX):
-        pid = pid[len(PLUGIN_FOLDER_PREFIX):]
+        pid = pid[len(PLUGIN_FOLDER_PREFIX) :]
 
     mw = HeadlessMW(frame, name=pid)
     mw.cur = frame_idx
@@ -384,6 +417,7 @@ def main(argv=None):
     # Build composited.png in the same patch, alpha-overlay, shape order as UI.
     from frameviewer.core.annotations import bake_sidecar_overlays
     from frameviewer.core.plugin_render import composite_patches
+
     full = _to_bgr8(frame)
     drew = False
 
@@ -393,10 +427,16 @@ def main(argv=None):
             if pimg is None:
                 print("render_patch -> None")
             else:
-                full = composite_patches(full, [{
-                    "image": pimg,
-                    "corner": getattr(inst, "corner", "tr"),
-                    "margin": getattr(inst, "margin", 8)}])
+                full = composite_patches(
+                    full,
+                    [
+                        {
+                            "image": pimg,
+                            "corner": getattr(inst, "corner", "tr"),
+                            "margin": getattr(inst, "margin", 8),
+                        }
+                    ],
+                )
                 drew = True
                 print(f"render_patch -> shape={pimg.shape} dtype={pimg.dtype}")
         except Exception:
@@ -455,8 +495,10 @@ def main(argv=None):
         for p in wrote:
             print(f"  {p}")
     else:
-        print("Aucune image ecrite (le plugin ne dessine pas d'overlay/panel "
-              "pour cette frame, ou renvoie None).")
+        print(
+            "Aucune image ecrite (le plugin ne dessine pas d'overlay/panel "
+            "pour cette frame, ou renvoie None)."
+        )
     return 0
 
 

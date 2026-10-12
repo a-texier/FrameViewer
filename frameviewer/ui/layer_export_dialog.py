@@ -1,16 +1,21 @@
 # -*- coding: utf-8 -*-
 """Export custom des calques .ver : barre de plage de frames a 2 poignees
 (_RangeBar) + dialogue de reorganisation (eclater/fusionner les tracks)."""
+
 import os
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
+from frameviewer.ui import icons
 from frameviewer.ui.i18n import ui_text
+from frameviewer.ui.theming import ui_color
+
 
 class _RangeBar(QtWidgets.QWidget):
     """Barre horizontale a 2 poignees glissables (bleu) pour choisir une
     plage [lo, hi] de frames — utilisee par LayerExportDialog."""
+
     rangeChanged = QtCore.Signal(int, int)
 
     def __init__(self, parent=None):
@@ -18,7 +23,7 @@ class _RangeBar(QtWidgets.QWidget):
         self._n = 1
         self._lo = 0
         self._hi = 0
-        self._drag = None   # "lo" | "hi" | None
+        self._drag = None  # "lo" | "hi" | None
         self.setMinimumHeight(30)
         self.setMouseTracking(True)
 
@@ -80,7 +85,7 @@ class _RangeBar(QtWidgets.QWidget):
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         w = self.width()
         mid = self.height() // 2
-        p.setPen(QtGui.QPen(QtGui.QColor(80, 80, 90), 3))
+        p.setPen(QtGui.QPen(ui_color(80, 80, 90), 3))
         p.drawLine(8, mid, w - 8, mid)
         xlo, xhi = self._x_of(self._lo), self._x_of(self._hi)
         p.setPen(QtGui.QPen(QtGui.QColor(90, 150, 220), 5))
@@ -107,7 +112,8 @@ class LayerExportDialog(QtWidgets.QDialog):
         vbox = QtWidgets.QVBoxLayout(self)
         lbl = QtWidgets.QLabel(
             "Choisis la plage de frames à exporter, les tracks .ver à inclure, "
-            "puis comment répartir ces tracks entre les fichiers de sortie.")
+            "puis comment répartir ces tracks entre les fichiers de sortie."
+        )
         lbl.setWordWrap(True)
         vbox.addWidget(lbl)
 
@@ -138,7 +144,7 @@ class LayerExportDialog(QtWidgets.QDialog):
         self._tree = QtWidgets.QTreeWidget()
         self._tree.setHeaderHidden(True)
         self._tree.setMaximumHeight(150)
-        groups = {}   # fichier -> [track_id, ...]
+        groups = {}  # fichier -> [track_id, ...]
         for L in mw._layers:
             # les calques issus d'un dossier YOLO (fmt "yolo") n'ont pas de
             # concept de track -- seule une classe par boite, sans identite
@@ -147,7 +153,9 @@ class LayerExportDialog(QtWidgets.QDialog):
                 groups.setdefault(L.get("file") or L["name"], []).append(L["key"])
         for file, tracks in groups.items():
             parent = QtWidgets.QTreeWidgetItem(
-                [f"📄 {file}  ({len(tracks)} track{'s' if len(tracks) > 1 else ''})"])
+                [f"{file}  ({len(tracks)} track{'s' if len(tracks) > 1 else ''})"]
+            )
+            parent.setIcon(0, icons.icon("doc"))
             parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate)
             parent.setData(0, Qt.UserRole, file)
             parent.setCheckState(0, Qt.Checked)
@@ -167,9 +175,11 @@ class LayerExportDialog(QtWidgets.QDialog):
         grp_mode = QtWidgets.QGroupBox("Répartition des fichiers de sortie")
         ml = QtWidgets.QVBoxLayout(grp_mode)
         self._rb_split = QtWidgets.QRadioButton(
-            "Éclater : un fichier .ver PAR TRACK cochée (mono-track chacun)")
+            "Éclater : un fichier .ver PAR TRACK cochée (mono-track chacun)"
+        )
         self._rb_merge = QtWidgets.QRadioButton(
-            "Fusionner : toutes les tracks cochées dans un seul fichier .ver")
+            "Fusionner : toutes les tracks cochées dans un seul fichier .ver"
+        )
         self._rb_split.setChecked(True)
         for rb in (self._rb_split, self._rb_merge):
             ml.addWidget(rb)
@@ -210,9 +220,11 @@ class LayerExportDialog(QtWidgets.QDialog):
         for i in range(self._tree.topLevelItemCount()):
             parent = self._tree.topLevelItem(i)
             file = parent.data(0, Qt.UserRole)
-            tids = [parent.child(j).data(0, Qt.UserRole)
-                    for j in range(parent.childCount())
-                    if parent.child(j).checkState(0) == Qt.Checked]
+            tids = [
+                parent.child(j).data(0, Qt.UserRole)
+                for j in range(parent.childCount())
+                if parent.child(j).checkState(0) == Qt.Checked
+            ]
             if tids:
                 out[file] = tids
         return out
@@ -231,9 +243,15 @@ class LayerExportDialog(QtWidgets.QDialog):
                     continue
                 x1, y1, x2, y2 = det[1], det[2], det[3], det[4]
                 labels = det[6] if len(det) > 6 else ()
-                parts = [f"{clip_idx + 1:.6e}", "1.000000e+00",
-                         f"{x1:.6e}", f"{y1:.6e}", f"{x2:.6e}", f"{y2:.6e}",
-                         f"{track_id:.6e}"]
+                parts = [
+                    f"{clip_idx + 1:.6e}",
+                    "1.000000e+00",
+                    f"{x1:.6e}",
+                    f"{y1:.6e}",
+                    f"{x2:.6e}",
+                    f"{y2:.6e}",
+                    f"{track_id:.6e}",
+                ]
                 parts.extend(labels if labels else ["unknown"])
                 lines.append("\t".join(parts))
         return lines
@@ -246,7 +264,8 @@ class LayerExportDialog(QtWidgets.QDialog):
             self._status.setText("Coche au moins une track .ver.")
             return
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, ui_text(self, "Dossier de destination pour les .ver..."))
+            self, ui_text(self, "Dossier de destination pour les .ver...")
+        )
         if not folder:
             return
         if self._rb_merge.isChecked():
@@ -258,15 +277,14 @@ class LayerExportDialog(QtWidgets.QDialog):
             lines = self._build_ver_lines(lo, hi, tids)
             if not lines:
                 continue
-            safe_name = "".join(c if (c.isalnum() or c in "._-") else "_"
-                                for c in str(out_name))
+            safe_name = "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(out_name))
             path = os.path.join(folder, f"{safe_name}.ver")
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write("\n".join(lines))
             written.append(path)
         if written:
             self._status.setText(
-                f"{len(written)} fichier(s) .ver écrits (frames {lo}→{hi}) → {folder}")
+                f"{len(written)} fichier(s) .ver écrits (frames {lo}→{hi}) → {folder}"
+            )
         else:
-            self._status.setText(
-                "Aucune annotation dans la plage/les tracks choisies.")
+            self._status.setText("Aucune annotation dans la plage/les tracks choisies.")

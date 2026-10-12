@@ -9,10 +9,10 @@ etre supprime, chaque fichier peut etre retire individuellement.
 L'etat vit sur MainWindow (`_plugin_state`, persiste en QSettings) ; ce module
 est la vue + les intentions, il appelle des methodes de MainWindow pour muter
 l'etat, rafraichir l'affichage et ouvrir les editeurs."""
+
 import os
 
 import cv2
-import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
@@ -202,12 +202,16 @@ def write_code_plugin_template(folder, slug, name, inputs):
     cls = "".join(p.capitalize() for p in slug.split("_")) + "Plugin"
     names = _input_names(inputs)
     doc = "\n".join(f"  - self.{n}" for n in names) or "  (aucune entree fichier declaree)"
-    init = "\n".join(f'        self.{n} = None' for n in names) or "        pass"
+    init = "\n".join(f"        self.{n} = None" for n in names) or "        pass"
     first = f"self.{names[0]}" if names else "None"
-    content = (_CODE_TEMPLATE
-               .replace("{cls}", cls).replace("{slug}", slug).replace("{name}", name)
-               .replace("{inputs_doc}", doc).replace("{inputs_init}", init)
-               .replace("{first_input}", first))
+    content = (
+        _CODE_TEMPLATE.replace("{cls}", cls)
+        .replace("{slug}", slug)
+        .replace("{name}", name)
+        .replace("{inputs_doc}", doc)
+        .replace("{inputs_init}", init)
+        .replace("{first_input}", first)
+    )
     with open(os.path.join(folder, "plugin.py"), "w", encoding="utf-8") as f:
         f.write(content)
 
@@ -233,10 +237,13 @@ class CodePluginWizard(QtWidgets.QDialog):
         self._frame = QtWidgets.QLineEdit("Current Frame")
         form.addRow("Entrée frame courante :", self._frame)
         lay.addLayout(form)
-        lay.addWidget(QtWidgets.QLabel(
-            "Entrées fichiers -- une variable par fichier à glisser-déposer.\n"
-            "Le nom doit être un identifiant Python (ex. csv_plots) : il "
-            "devient self.<nom> dans le code."))
+        lay.addWidget(
+            QtWidgets.QLabel(
+                "Entrées fichiers -- une variable par fichier à glisser-déposer.\n"
+                "Le nom doit être un identifiant Python (ex. csv_plots) : il "
+                "devient self.<nom> dans le code."
+            )
+        )
         self._list = QtWidgets.QListWidget()
         lay.addWidget(self._list, 1)
         row = QtWidgets.QHBoxLayout()
@@ -250,21 +257,23 @@ class CodePluginWizard(QtWidgets.QDialog):
         lay.addLayout(row)
         self._list.addItem("csv_data")
         btns = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
 
     def _add(self):
         name, ok = QtWidgets.QInputDialog.getText(
-            self, "Nouvelle entrée", "Nom de variable (identifiant Python) :")
+            self, "Nouvelle entrée", "Nom de variable (identifiant Python) :"
+        )
         name = name.strip()
         if not ok or not name:
             return
         if not _is_identifier(name):
             QtWidgets.QMessageBox.warning(
-                self, "Nouvelle entrée",
-                f"« {name} » n'est pas un identifiant Python valide.")
+                self, "Nouvelle entrée", f"« {name} » n'est pas un identifiant Python valide."
+            )
             return
         self._list.addItem(name)
 
@@ -302,7 +311,7 @@ def _eye_icon(open_eye):
         p.setBrush(col)
         p.drawEllipse(QtCore.QPointF(9, 9), 2.3, 2.3)
     else:
-        p.drawLine(3, 15, 15, 3)   # barre = masque
+        p.drawLine(3, 15, 15, 3)  # barre = masque
     p.end()
     return QtGui.QIcon(pm)
 
@@ -325,35 +334,40 @@ def _icon_from(draw_fn):
 def _draft_icon():
     def d(p):
         # feuille avec coin plie
-        poly = QtGui.QPolygonF([QtCore.QPointF(*pt) for pt in
-                                [(4, 2), (11, 2), (14, 5), (14, 16), (4, 16)]])
+        poly = QtGui.QPolygonF(
+            [QtCore.QPointF(*pt) for pt in [(4, 2), (11, 2), (14, 5), (14, 16), (4, 16)]]
+        )
         p.drawPolygon(poly)
-        p.drawLine(11, 2, 11, 5)      # pli
+        p.drawLine(11, 2, 11, 5)  # pli
         p.drawLine(11, 5, 14, 5)
-        p.drawLine(6, 9, 12, 9)       # lignes de texte
+        p.drawLine(6, 9, 12, 9)  # lignes de texte
         p.drawLine(6, 11, 12, 11)
         p.drawLine(6, 13, 10, 13)
+
     return _icon_from(d)
 
 
 def _folder_icon():
     def d(p):
-        poly = QtGui.QPolygonF([QtCore.QPointF(*pt) for pt in
-                                [(2, 14), (2, 6), (7, 6), (9, 8), (16, 8), (16, 14)]])
+        poly = QtGui.QPolygonF(
+            [QtCore.QPointF(*pt) for pt in [(2, 14), (2, 6), (7, 6), (9, 8), (16, 8), (16, 14)]]
+        )
         p.drawPolygon(poly)
+
     return _icon_from(d)
 
 
 def _trash_icon():
     def d(p):
-        p.drawLine(3, 5, 15, 5)       # couvercle
-        p.drawLine(7, 5, 7, 3)        # anse
+        p.drawLine(3, 5, 15, 5)  # couvercle
+        p.drawLine(7, 5, 7, 3)  # anse
         p.drawLine(7, 3, 11, 3)
         p.drawLine(11, 3, 11, 5)
-        p.drawLine(5, 5, 6, 15)       # corps (trapeze)
+        p.drawLine(5, 5, 6, 15)  # corps (trapeze)
         p.drawLine(13, 5, 12, 15)
         p.drawLine(6, 15, 12, 15)
-        p.drawLine(9, 7, 9, 13)       # stries
+        p.drawLine(9, 7, 9, 13)  # stries
+
     return _icon_from(d)
 
 
@@ -378,8 +392,9 @@ class InputDropZone(QtWidgets.QFrame):
     """Zone d'une entree : nom + zone drag-and-drop. Vide = grisee ; fichier
     associe = bordure verte + chemin. Parcourir/effacer. Le fichier appartient
     au JEU d'entrees (contrat) courant du plugin."""
-    fileChanged = QtCore.Signal(str, str)   # (nom_entree, chemin | "")
-    deleteRequested = QtCore.Signal(str)    # (nom_entree) : supprimer l'entree declaree
+
+    fileChanged = QtCore.Signal(str, str)  # (nom_entree, chemin | "")
+    deleteRequested = QtCore.Signal(str)  # (nom_entree) : supprimer l'entree declaree
 
     def __init__(self, name, path, parent=None):
         super().__init__(parent)
@@ -422,20 +437,23 @@ class InputDropZone(QtWidgets.QFrame):
         self._path = path or ""
         if path:
             self._path_lbl.setText(path)
-            self.setStyleSheet("InputDropZone{border:1px solid #4a8; "
-                               "background:rgba(60,160,110,0.12);}")
+            self.setStyleSheet(
+                "InputDropZone{border:1px solid #4a8; background:rgba(60,160,110,0.12);}"
+            )
         else:
             self._path_lbl.setText("")
             self._path_lbl.setPlaceholderText("Glisser-déposer un fichier ici")
             # bordure bleutee au repos : signale une zone de depot accessible.
-            self.setStyleSheet("InputDropZone{border:1px dashed #4a6a9a; "
-                               "background:rgba(90,140,200,0.06);}")
+            self.setStyleSheet(
+                "InputDropZone{border:1px dashed #4a6a9a; background:rgba(90,140,200,0.06);}"
+            )
 
     def _hint(self, on):
         # surbrillance verte pendant un glisser : "zone valide pour le drop".
         if on:
-            self.setStyleSheet("InputDropZone{border:2px solid #5cd98a; "
-                               "background:rgba(90,220,140,0.22);}")
+            self.setStyleSheet(
+                "InputDropZone{border:2px solid #5cd98a; background:rgba(90,220,140,0.22);}"
+            )
         else:
             self._apply(getattr(self, "_path", "") or "")
 
@@ -445,7 +463,8 @@ class InputDropZone(QtWidgets.QFrame):
 
     def _pick(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, ui_text(self, f"Fichier pour « {self._name} »"))
+            self, ui_text(self, f"Fichier pour « {self._name} »")
+        )
         if path:
             self._set(os.path.normpath(path))
 
@@ -501,13 +520,18 @@ class PluginCard(QtWidgets.QFrame):
         self._arrow.clicked.connect(self._toggle)
         head.addWidget(self._arrow)
         name = _ElidedPluginName(self.lp.name)
-        f = name.font(); f.setBold(True); name.setFont(f)
+        f = name.font()
+        f.setBold(True)
+        name.setFont(f)
         head.addWidget(name, 1)
-        status = "Actif" if self.lp.enabled else ("Erreur" if self.lp.instance is None else "Inactif")
+        status = (
+            "Actif" if self.lp.enabled else ("Erreur" if self.lp.instance is None else "Inactif")
+        )
         col = "#3a3" if self.lp.enabled else ("#c55" if self.lp.instance is None else "#777")
         self._badge = QtWidgets.QLabel(status)
-        self._badge.setStyleSheet(f"background:{col}; color:white; border-radius:3px; "
-                                  "padding:1px 8px; font-size:10px;")
+        self._badge.setStyleSheet(
+            f"background:{col}; color:white; border-radius:3px; padding:1px 8px; font-size:10px;"
+        )
         head.addWidget(self._badge)
         self._chk = QtWidgets.QCheckBox("Actif")
         self._chk.setObjectName(f"plugin_active_{self.pid}")
@@ -515,16 +539,22 @@ class PluginCard(QtWidgets.QFrame):
         self._chk.setEnabled(self.lp.instance is not None)
         self._chk.toggled.connect(self._on_enable)
         head.addWidget(self._chk)
-        b_edit = QtWidgets.QToolButton(); b_edit.setIcon(_draft_icon())
-        b_edit.setAutoRaise(True); b_edit.setToolTip("Éditer le plugin")
+        b_edit = QtWidgets.QToolButton()
+        b_edit.setIcon(_draft_icon())
+        b_edit.setAutoRaise(True)
+        b_edit.setToolTip("Éditer le plugin")
         b_edit.clicked.connect(lambda: self._panel.open_editor(self.lp))
         head.addWidget(b_edit)
-        b_folder = QtWidgets.QToolButton(); b_folder.setIcon(_folder_icon())
-        b_folder.setAutoRaise(True); b_folder.setToolTip("Ouvrir le dossier")
+        b_folder = QtWidgets.QToolButton()
+        b_folder.setIcon(_folder_icon())
+        b_folder.setAutoRaise(True)
+        b_folder.setToolTip("Ouvrir le dossier")
         b_folder.clicked.connect(lambda: self._panel.open_folder(self.lp))
         head.addWidget(b_folder)
-        b_del = QtWidgets.QToolButton(); b_del.setIcon(_trash_icon())
-        b_del.setAutoRaise(True); b_del.setToolTip("Supprimer le plugin")
+        b_del = QtWidgets.QToolButton()
+        b_del.setIcon(_trash_icon())
+        b_del.setAutoRaise(True)
+        b_del.setToolTip("Supprimer le plugin")
         b_del.clicked.connect(lambda: self._panel.delete_plugin(self.lp))
         head.addWidget(b_del)
         outer.addLayout(head)
@@ -536,12 +566,16 @@ class PluginCard(QtWidgets.QFrame):
         bl.setContentsMargins(18, 2, 4, 4)
         bl.setSpacing(6)
         if self.lp.instance is None and self.lp.error:
-            err = QtWidgets.QLabel("Erreur de chargement :\n" + self.lp.error.strip().splitlines()[-1])
+            err = QtWidgets.QLabel(
+                "Erreur de chargement :\n" + self.lp.error.strip().splitlines()[-1]
+            )
             err.setStyleSheet("color:#e08030; font-family:monospace; font-size:11px;")
             err.setWordWrap(True)
             bl.addWidget(err)
-        self._groups_box = QtWidgets.QWidget(); bl.addWidget(self._groups_box)
-        self._actions_box = QtWidgets.QWidget(); bl.addWidget(self._actions_box)
+        self._groups_box = QtWidgets.QWidget()
+        bl.addWidget(self._groups_box)
+        self._actions_box = QtWidgets.QWidget()
+        bl.addWidget(self._actions_box)
         self._preview = QtWidgets.QLabel()
         self._preview.setMinimumHeight(10)
         bl.addWidget(self._preview)
@@ -555,8 +589,9 @@ class PluginCard(QtWidgets.QFrame):
         # toute la descendance -> tout se retrouve entoure de bleu.
         c = "#4a90d9" if selected else "#3a3a44"
         w = 2 if selected else 1
-        self.setStyleSheet(f"#PluginCard{{border:{w}px solid {c}; border-radius:6px; "
-                           "background-color:#202126;}}")
+        self.setStyleSheet(
+            f"#PluginCard{{border:{w}px solid {c}; border-radius:6px; background-color:#202126;}}"
+        )
 
     # ---- interactions ----
     def mousePressEvent(self, e):
@@ -583,8 +618,10 @@ class PluginCard(QtWidgets.QFrame):
         self._mw._plugin_loader.set_enabled(self.pid, on)
         self._mw._save_enabled_plugin_ids()
         set_ui_text(self._badge, "Actif" if on else "Inactif")
-        self._badge.setStyleSheet(f"background:{'#3a3' if on else '#777'}; color:white; "
-                                  "border-radius:3px; padding:1px 8px; font-size:10px;")
+        self._badge.setStyleSheet(
+            f"background:{'#3a3' if on else '#777'}; color:white; "
+            "border-radius:3px; padding:1px 8px; font-size:10px;"
+        )
         self._mw._repaint_views()
         self._panel.update_summary()
 
@@ -605,6 +642,7 @@ class PluginCard(QtWidgets.QFrame):
         # boutons du hook menu_actions + ouverture du dock build_panel, si le
         # plugin les fournit. Regroupes sous "Actions" dans le corps de la carte.
         from frameviewer.plugins.api import FrameViewerPlugin
+
         _clear_layout(self._actions_box)
         inst = self.lp.instance
         if inst is None:
@@ -639,8 +677,7 @@ class PluginCard(QtWidgets.QFrame):
         try:
             fn()
         except Exception as e:
-            self._mw._plugin_loader.log(f"action plugin : {e}", level="error",
-                                        pid=self.pid)
+            self._mw._plugin_loader.log(f"action plugin : {e}", level="error", pid=self.pid)
 
     def _toggle_dock_panel(self):
         # un seul dock par plugin : s'il existe deja, on bascule montre/cache
@@ -659,7 +696,7 @@ class PluginCard(QtWidgets.QFrame):
                 self._update_dock_button_text()
                 return
             except RuntimeError:
-                docks.pop(self.pid, None)   # dock detruit -> on recree
+                docks.pop(self.pid, None)  # dock detruit -> on recree
         try:
             before = getattr(self._mw, "_plugin_last_dock", None)
             self._mw._plugin_loader.build_panel(self.lp)
@@ -668,11 +705,9 @@ class PluginCard(QtWidgets.QFrame):
                 docks[self.pid] = dock
                 # le bouton doit refleter aussi une fermeture via la croix du
                 # dock lui-meme, pas seulement un clic sur ce bouton.
-                dock.visibilityChanged.connect(
-                    lambda _visible: self._update_dock_button_text())
+                dock.visibilityChanged.connect(lambda _visible: self._update_dock_button_text())
         except Exception as e:
-            self._mw._plugin_loader.log(f"build_panel : {e}", level="error",
-                                        pid=self.pid)
+            self._mw._plugin_loader.log(f"build_panel : {e}", level="error", pid=self.pid)
         self._update_dock_button_text()
 
     def _update_dock_button_text(self):
@@ -688,22 +723,23 @@ class PluginCard(QtWidgets.QFrame):
             except RuntimeError:
                 visible = False
         try:
-            set_ui_text(
-                btn,
-                "Fermer le panneau (dock)" if visible else "Ouvrir le panneau (dock)")
+            set_ui_text(btn, "Fermer le panneau (dock)" if visible else "Ouvrir le panneau (dock)")
         except RuntimeError:
             pass
 
     def _build_groups(self):
         _clear_layout(self._groups_box)
-        st = self._mw._plugin_state_for(self.pid)      # entrees declarees (global)
-        vs = self._mw._plugin_view_state(self.pid)     # jeux d'entrees de la vue courante
+        st = self._mw._plugin_state_for(self.pid)  # entrees declarees (global)
+        vs = self._mw._plugin_view_state(self.pid)  # jeux d'entrees de la vue courante
         lay = QtWidgets.QVBoxLayout(self._groups_box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        fr = QtWidgets.QLabel("Frame : " + self.lp.manifest.get("frame_input", "Current Frame")
-                              + "  (fournie automatiquement)")
+        fr = QtWidgets.QLabel(
+            "Frame : "
+            + self.lp.manifest.get("frame_input", "Current Frame")
+            + "  (fournie automatiquement)"
+        )
         fr.setStyleSheet("color:#9ab; font-size:11px;")
         lay.addWidget(fr)
 
@@ -718,7 +754,8 @@ class PluginCard(QtWidgets.QFrame):
         hl.setStyleSheet("color:#9ab; font-size:11px;")
         hl.setWordWrap(True)
         hdr.addWidget(hl, 1)
-        add = QtWidgets.QToolButton(); add.setText("+ Entrée")
+        add = QtWidgets.QToolButton()
+        add.setText("+ Entrée")
         add.setToolTip("Ajouter une entrée (change le format du plugin : nouvelle self.<nom>)")
         add.clicked.connect(self._add_input)
         hdr.addWidget(add)
@@ -747,7 +784,8 @@ class PluginCard(QtWidgets.QFrame):
                 eye.setToolTip("Afficher / masquer ce jeu d'entrées")
                 eye.clicked.connect(lambda _=False, k=gi: self._toggle_group_visible(k))
                 title.addWidget(eye)
-                rm = QtWidgets.QToolButton(); rm.setText("Suppr.")
+                rm = QtWidgets.QToolButton()
+                rm.setText("Suppr.")
                 rm.setAutoRaise(True)
                 rm.setToolTip("Supprimer ce jeu d'entrées complet")
                 rm.clicked.connect(lambda _=False, k=gi: self._remove_group(k))
@@ -756,7 +794,8 @@ class PluginCard(QtWidgets.QFrame):
             for inp in req:
                 zone = InputDropZone(inp["name"], group["files"].get(inp["name"], ""))
                 zone.fileChanged.connect(
-                    lambda name, path, k=gi: self._on_input_file(k, name, path))
+                    lambda name, path, k=gi: self._on_input_file(k, name, path)
+                )
                 zone.deleteRequested.connect(self._delete_input)
                 gl.addWidget(zone)
             lay.addWidget(box)
@@ -800,27 +839,29 @@ class PluginCard(QtWidgets.QFrame):
 
     def _add_input(self):
         name, ok = QtWidgets.QInputDialog.getText(
-            self, "Nouvelle entrée",
-            "Nom de variable (identifiant Python, ex. csv_labels) :")
+            self, "Nouvelle entrée", "Nom de variable (identifiant Python, ex. csv_labels) :"
+        )
         name = name.strip()
         if not ok or not name:
             return
         if not name.isidentifier():
             QtWidgets.QMessageBox.warning(
-                self, "Nouvelle entrée",
-                f"« {name} » n'est pas un identifiant Python valide.")
+                self, "Nouvelle entrée", f"« {name} » n'est pas un identifiant Python valide."
+            )
             return
         if self._mw._add_plugin_input(self.pid, name):
             self._commit()
 
     def _delete_input(self, name):
         r = QtWidgets.QMessageBox.question(
-            self, "Supprimer l'entrée",
+            self,
+            "Supprimer l'entrée",
             f"Supprimer l'entrée « {name} » du plugin ?\n\n"
             f"Elle sera retirée du manifest.json et la ligne self.{name} "
             f"du plugin.py, ainsi que les fichiers déposés sous cette entrée.",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.No)
+            QtWidgets.QMessageBox.No,
+        )
         if r != QtWidgets.QMessageBox.Yes:
             return
         if self._mw._remove_plugin_input(self.pid, name):
@@ -828,6 +869,7 @@ class PluginCard(QtWidgets.QFrame):
 
     def _update_preview(self):
         from frameviewer.plugins.api import FrameViewerPlugin
+
         # Un plugin qui ne fournit pas render_panel n'a pas d'apercu de zone :
         # on masque simplement la zone (l'overlay se voit sur l'image, pas ici).
         inst = self.lp.instance
@@ -860,7 +902,7 @@ def _clear_layout(widget):
                 w.deleteLater()
             elif it.layout():
                 _clear_sub(it.layout())
-        QtWidgets.QWidget().setLayout(old)   # detache l'ancien layout
+        QtWidgets.QWidget().setLayout(old)  # detache l'ancien layout
 
 
 def _clear_sub(lay):
@@ -877,7 +919,8 @@ _SEG_SS = (
     "QPushButton{padding:6px 14px; border:1px solid #555; background:#1e1e1e;"
     "color:#aaa; border-radius:4px; font-weight:bold;}"
     "QPushButton:hover:!checked{background:#2e2e2e; color:#ddd;}"
-    "QPushButton:checked{background:#2d4f70; color:#fff; border-color:#5aafff;}")
+    "QPushButton:checked{background:#2d4f70; color:#fff; border-color:#5aafff;}"
+)
 
 
 class _ElidedPluginName(QtWidgets.QLabel):
@@ -898,8 +941,7 @@ class _ElidedPluginName(QtWidgets.QLabel):
 
     def _update_text(self):
         available = max(0, self.width() - 2)
-        self.setText(self.fontMetrics().elidedText(
-            self._full_text, Qt.ElideRight, available))
+        self.setText(self.fontMetrics().elidedText(self._full_text, Qt.ElideRight, available))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -915,7 +957,8 @@ _HELP_BUTTON_SS = (
     "QToolButton{min-width:28px;min-height:28px;border:1px solid #5aafff;"
     "border-radius:4px;background:#1769aa;color:white;font-weight:bold;}"
     "QToolButton:hover{background:#2185d0;border-color:#8ac7ff;}"
-    "QToolButton:pressed{background:#125789;}")
+    "QToolButton:pressed{background:#125789;}"
+)
 
 
 class PluginsPanel(QtWidgets.QWidget):
@@ -924,7 +967,7 @@ class PluginsPanel(QtWidgets.QWidget):
     def __init__(self, mw):
         super().__init__(mw)
         self._mw = mw
-        self._kind = "code"          # segment actif
+        self._kind = "code"  # segment actif
         self._selected_pid = None
         self._cards = []
         self._build()
@@ -933,8 +976,7 @@ class PluginsPanel(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
         lay.setSpacing(6)
-        info = QtWidgets.QLabel(
-            "Glissez-déposez vos fichiers sur les entrées du plugin.")
+        info = QtWidgets.QLabel("Glissez-déposez vos fichiers sur les entrées du plugin.")
         info.setWordWrap(True)
         lay.addWidget(info)
 
@@ -961,21 +1003,25 @@ class PluginsPanel(QtWidgets.QWidget):
         b_import.clicked.connect(lambda: self._mw._import_plugin())
         row.addWidget(b_import)
         b_reload = QtWidgets.QPushButton("Actualiser")
-        b_reload.setToolTip("Recharge tous les plugins depuis le disque "
-                            "(recompile le code, sans cache).")
+        b_reload.setToolTip(
+            "Recharge tous les plugins depuis le disque (recompile le code, sans cache)."
+        )
         b_reload.clicked.connect(lambda: self._mw._reload_plugins_from_settings())
         row.addWidget(b_reload)
         b_console = QtWidgets.QPushButton("Console")
         b_console.setObjectName("plugin_console_button")
-        b_console.setToolTip("Journal (logs, prints, erreurs) + test sur la frame "
-                             "courante + diagnostic env + export debug VS Code.")
+        b_console.setToolTip(
+            "Journal (logs, prints, erreurs) + test sur la frame "
+            "courante + diagnostic env + export debug VS Code."
+        )
         b_console.clicked.connect(lambda: self._mw._open_plugin_console())
         row.addWidget(b_console)
         b_help = QtWidgets.QToolButton()
         b_help.setText("?")
         b_help.setStyleSheet(_HELP_BUTTON_SS)
-        b_help.setToolTip("Aide : tous les hooks et objets api, par theme "
-                          "(le requis en vert), avec exemples.")
+        b_help.setToolTip(
+            "Aide : tous les hooks et objets api, par theme (le requis en vert), avec exemples."
+        )
         b_help.clicked.connect(lambda: self._mw._open_plugin_help())
         row.addWidget(b_help)
         lay.addLayout(row)
@@ -1002,9 +1048,7 @@ class PluginsPanel(QtWidgets.QWidget):
         self._kind = kind
         self._b_code.setChecked(kind == "code")
         self._b_graph.setChecked(kind == "graph")
-        set_ui_text(
-            self._b_new,
-            "+ Plugin Code" if kind == "code" else "+ Plugin Graphe")
+        set_ui_text(self._b_new, "+ Plugin Code" if kind == "code" else "+ Plugin Graphe")
         self.refresh()
 
     def _new_plugin(self):
@@ -1076,8 +1120,7 @@ class PluginsPanel(QtWidgets.QWidget):
         n = len([l for l in loader.plugins if l.kind == self._kind])
         act = len([l for l in loader.enabled_plugins() if l.kind == self._kind])
         if lp is None:
-            set_ui_text(
-                self._summary, f"{n} plugin(s) {self._kind}, {act} actif(s).")
+            set_ui_text(self._summary, f"{n} plugin(s) {self._kind}, {act} actif(s).")
         else:
             st = self._mw._plugin_state_for(lp.plugin_id)
             n_in = sum(1 for i in st["inputs"] if not i.get("hidden"))
@@ -1087,19 +1130,25 @@ class PluginsPanel(QtWidgets.QWidget):
                 self._summary,
                 f"Plugin : {lp.name}   |   Entrées : {n_in}   |   "
                 f"Jeux actifs : {len(sets)}   |   Statut : "
-                f"{'● Actif' if lp.enabled else '○ Inactif'}   |   "
-                f"Dernière exécution : {last}")
+                f"{'Actif' if lp.enabled else 'Inactif'}   |   "
+                f"Dernière exécution : {last}",
+            )
         self._rebuild_elements(lp)
 
     def _rebuild_elements(self, lp):
         _clear_sub(self._elem_lay)
         from frameviewer.plugins.api import FrameViewerPlugin, PluginAPI
+
         elems = []
-        if lp is not None and lp.instance is not None and \
-                type(lp.instance).overlay_elements is not FrameViewerPlugin.overlay_elements:
+        if (
+            lp is not None
+            and lp.instance is not None
+            and type(lp.instance).overlay_elements is not FrameViewerPlugin.overlay_elements
+        ):
             try:
-                elems = lp.instance.overlay_elements(
-                    PluginAPI(self._mw, lp.folder, lp.plugin_id)) or []
+                elems = (
+                    lp.instance.overlay_elements(PluginAPI(self._mw, lp.folder, lp.plugin_id)) or []
+                )
             except Exception:
                 elems = []
         if not elems:
@@ -1115,5 +1164,7 @@ class PluginsPanel(QtWidgets.QWidget):
             cb = QtWidgets.QCheckBox(text)
             cb.setToolTip("Touche clavier : " + kb if kb else "Aucune touche mappée")
             cb.setChecked(bool(states.get(key, True)))
-            cb.toggled.connect(lambda on, k=key, p=lp.plugin_id: self._mw._on_element_toggled(p, k, on))
+            cb.toggled.connect(
+                lambda on, k=key, p=lp.plugin_id: self._mw._on_element_toggled(p, k, on)
+            )
             self._elem_lay.addWidget(cb)

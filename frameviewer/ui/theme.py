@@ -919,3 +919,46 @@ QCheckBox::indicator:checked { background:#5a86e0; border:1px solid #7aa0ff; }
 QListWidget { background:#2a2a30; border:1px solid #3a3a42; }
 QListWidget::item:selected { background:#3f6dd0; color:white; }
 """
+
+# Theme clair : memes regles que DARK_QSS, couleurs inversees. Les vues image
+# (cadres, bandeaux, mini-barres) gardent leur fond sombre, comme dans la
+# plupart des visionneuses : le contraste de l'image n'en depend pas.
+LIGHT_QSS = """
+QWidget { background:#f3f3f5; color:#1e1e22; font-size:12px; }
+QPushButton { background:#ffffff; border:1px solid #c4c4cc; border-radius:5px; padding:5px 9px; }
+QPushButton:hover { background:#e8eef9; }
+QPushButton:disabled { color:#9a9aa2; background:#ececef; }
+QPushButton:checked { background:#3f6dd0; border-color:#2f5cc0; color:white; }
+QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit { background:#ffffff; border:1px solid #c4c4cc; border-radius:4px; padding:3px 6px; }
+QGroupBox { border:1px solid #c4c4cc; border-radius:5px; margin-top:8px; padding-top:6px; }
+QGroupBox::title { subcontrol-origin: margin; left:8px; padding:0 4px; color:#4a4a58; }
+QSlider::groove:horizontal { height:6px; background:#c9c9d2; border-radius:3px; }
+QSlider::handle:horizontal { width:14px; background:#3f6dd0; border-radius:7px; margin:-5px 0; }
+QSlider::sub-page:horizontal { background:#5a86e0; border-radius:3px; }
+QDockWidget::close-button, QDockWidget::float-button { background:transparent; border:none; padding:1px; }
+QDockWidget::title { background:#e4e4e9; padding:4px; }
+QStatusBar { color:#4a4a58; }
+QLabel { color:#2a2a33; }
+QToolBar { background:#e4e4e9; border-bottom:1px solid #c4c4cc; spacing:3px; padding:3px; }
+QToolBar QPushButton { padding:4px 8px; }
+QToolBar::separator { background:#c4c4cc; width:1px; margin:3px 5px; }
+QRadioButton, QCheckBox { spacing:6px; }
+QRadioButton::indicator, QCheckBox::indicator { width:14px; height:14px; border:1px solid #8a8a96; background:#ffffff; }
+QRadioButton::indicator { border-radius:8px; }
+QCheckBox::indicator { border-radius:3px; }
+QRadioButton::indicator:checked { background:#ffffff; border:2px solid #3f6dd0; }
+QCheckBox::indicator:checked { background:#3f6dd0; border:1px solid #2f5cc0; }
+QListWidget, QTreeWidget, QTextEdit, QPlainTextEdit, QTextBrowser { background:#ffffff; border:1px solid #c4c4cc; }
+QListWidget::item:selected { background:#3f6dd0; color:white; }
+QMenu { background:#ffffff; border:1px solid #c4c4cc; }
+QMenu::item:selected { background:#dbe6fa; color:#1e1e22; }
+QMenu::item:disabled { color:#8a8a96; }
+QToolTip { background:#fffff0; color:#1e1e22; border:1px solid #c4c4cc; }
+QHeaderView::section { background:#e8e8ee; color:#2a2a33; border:none; border-right:1px solid #c4c4cc; padding:3px 6px; }
+QProgressBar { background:#ffffff; border:1px solid #c4c4cc; border-radius:3px; text-align:center; }
+QProgressBar::chunk { background:#3f6dd0; border-radius:2px; }
+QToolButton { color:#1e1e22; }
+QDockWidget { color:#1e1e22; }
+"""
+
+THEMES = {"dark": DARK_QSS, "light": LIGHT_QSS}

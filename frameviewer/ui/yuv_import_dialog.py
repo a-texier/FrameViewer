@@ -3,6 +3,7 @@
 demande largeur, hauteur et format. Validation en direct contre la taille du
 premier fichier (octets par frame vs taille reelle) pour aider a trouver la
 bonne geometrie."""
+
 from PySide6 import QtWidgets
 
 from frameviewer.core.sources import YUV_FORMATS, yuv_frame_bytes
@@ -38,7 +39,8 @@ class YuvImportDialog(QtWidgets.QDialog):
         vbox.addLayout(form)
         vbox.addWidget(self._info)
         btns = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         self._ok = btns.button(QtWidgets.QDialogButtonBox.Ok)
@@ -59,19 +61,25 @@ class YuvImportDialog(QtWidgets.QDialog):
             self._ok.setEnabled(False)
             return
         n, rest = divmod(self._file_size, fb)
-        ok = (n >= 1)
+        ok = n >= 1
         if rest == 0 and n == 1:
-            txt = (f"OK : {fb} octets/frame = la taille du fichier "
-                   f"({self._file_size}). 1 frame par fichier.")
+            txt = (
+                f"OK : {fb} octets/frame = la taille du fichier "
+                f"({self._file_size}). 1 frame par fichier."
+            )
             color = "#3ad06a"
         elif rest == 0 and n > 1:
-            txt = (f"Attention : {fb} octets/frame -> le fichier contient {n} "
-                   f"frames. En mode 1 frame/fichier, seule la 1re est lue.")
+            txt = (
+                f"Attention : {fb} octets/frame -> le fichier contient {n} "
+                f"frames. En mode 1 frame/fichier, seule la 1re est lue."
+            )
             color = "#e0a030"
         else:
-            txt = (f"Ne correspond pas : {fb} octets/frame, fichier = "
-                   f"{self._file_size} octets (reste {rest}). Ajustez "
-                   f"largeur/hauteur/format jusqu'a reste = 0.")
+            txt = (
+                f"Ne correspond pas : {fb} octets/frame, fichier = "
+                f"{self._file_size} octets (reste {rest}). Ajustez "
+                f"largeur/hauteur/format jusqu'a reste = 0."
+            )
             color = "#e05555"
         self._info.setStyleSheet(f"color:{color}; font-size:11px;")
         self._info.setText(txt)

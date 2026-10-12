@@ -1,35 +1,58 @@
 # -*- coding: utf-8 -*-
 """Vue image centrale : zoom/pan, ROI, ligne de profil, regle, dessin des
 overlays SIDECAR."""
+
 import math
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
+from frameviewer.core.pipeline import to_intensity
+from frameviewer.ui.theming import ui_color
+
+
+def probe_text(raw, x, y):
+    """Texte de sonde "x= y= v=" : valeur NATIVE (intensite) du pixel, ou None.
+
+    ``raw`` est la frame non rendue, dans le repere affiche.
+    """
+    if raw is None or x < 0 or y < 0:
+        return None
+    h, w = raw.shape[:2]
+    if not (0 <= y < h and 0 <= x < w):
+        return None
+    v = to_intensity(raw[y : y + 1, x : x + 1])[0, 0]
+    if np.ndim(v) == 0:
+        vtxt = f"{float(v):.4g}"
+    else:
+        vtxt = "/".join(f"{float(c):.4g}" for c in np.atleast_1d(v))
+    return f"x= {x}   y= {y}   v= {vtxt}"
+
+
 class VideoWidget(QtWidgets.QWidget):
-    clicked = QtCore.Signal(int, int)                 # coordonnees image
-    roiChanged = QtCore.Signal(int, int, int, int)    # x, y, w, h (image)
-    lineChanged = QtCore.Signal(int, int, int, int)   # x1,y1,x2,y2 (profil ligne)
-    rulerChanged = QtCore.Signal(object)              # list of (x,y) tuples (règle)
-    hovered = QtCore.Signal(int, int)                 # survol : coordonnees image (-1,-1 = sortie)
-    viewChanged = QtCore.Signal()                     # zoom / pan modifié (pour lier les vues)
+    clicked = QtCore.Signal(int, int)  # coordonnees image
+    roiChanged = QtCore.Signal(int, int, int, int)  # x, y, w, h (image)
+    lineChanged = QtCore.Signal(int, int, int, int)  # x1,y1,x2,y2 (profil ligne)
+    rulerChanged = QtCore.Signal(object)  # list of (x,y) tuples (règle)
+    hovered = QtCore.Signal(int, int)  # survol : coordonnees image (-1,-1 = sortie)
+    viewChanged = QtCore.Signal()  # zoom / pan modifié (pour lier les vues)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(360, 240)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.StrongFocus)   # recoit les fleches/raccourcis
+        self.setFocusPolicy(Qt.StrongFocus)  # recoit les fleches/raccourcis
         self._pixmap = None
         self._iw = 0
         self._ih = 0
-        self._markers = []         # (x, y, index)
-        self._overlays = []        # graphiques SIDECAR de la frame courante
+        self._markers = []  # (x, y, index)
+        self._overlays = []  # graphiques SIDECAR de la frame courante
         self._scale = 1.0
         self._ox = 0.0
         self._oy = 0.0
-        self._hover = None         # (ix, iy)
-        self._probe_txt = None     # texte "x= y= v=" affiché en haut-gauche (vert)
+        self._hover = None  # (ix, iy)
+        self._probe_txt = None  # texte "x= y= v=" affiché en haut-gauche (vert)
         # zoom / pan
         self._zoom = 1.0
         self._pan = QtCore.QPointF(0.0, 0.0)
@@ -38,18 +61,18 @@ class VideoWidget(QtWidgets.QWidget):
         self._pan_anchor = QtCore.QPointF(0.0, 0.0)
         self._pan_orig = QtCore.QPointF(0.0, 0.0)
         # selection rectangulaire (ROI) : clic-glisse = rectangle, clic simple = clic
-        self._roi = None           # (x, y, w, h) en coords image
-        self._roi_green = False    # ROI dessinee en vert (mode crop d'export)
-        self._roi_drag = None      # coin de depart (ix, iy)
+        self._roi = None  # (x, y, w, h) en coords image
+        self._roi_green = False  # ROI dessinee en vert (mode crop d'export)
+        self._roi_drag = None  # coin de depart (ix, iy)
         self._left_down = False
         self._drawing_roi = False
         self._press_pos = QtCore.QPointF(0.0, 0.0)
         # outil actif : "roi" | "line" | "ruler"
         self._tool_mode = "roi"
-        self._line = None          # (x1,y1,x2,y2) en cours de trace
-        self._line_start = None    # point de depart du trace
-        self._line_probe = None    # (x, y, value) pilote par le mini-profil
-        self._ruler_pts = []       # [(x,y)] 0/1/2 points cliques
+        self._line = None  # (x1,y1,x2,y2) en cours de trace
+        self._line_start = None  # point de depart du trace
+        self._line_probe = None  # (x, y, value) pilote par le mini-profil
+        self._ruler_pts = []  # [(x,y)] 0/1/2 points cliques
 
     def set_tool_mode(self, mode):
         """mode : "roi" | "line" | "ruler"."""
@@ -59,8 +82,8 @@ class VideoWidget(QtWidgets.QWidget):
         self._line_probe = None
         self._ruler_pts = []
         cur = {
-            "roi":   Qt.ArrowCursor,
-            "line":  Qt.CrossCursor,
+            "roi": Qt.ArrowCursor,
+            "line": Qt.CrossCursor,
             "ruler": Qt.CrossCursor,
         }.get(mode, Qt.ArrowCursor)
         self.setCursor(cur)
@@ -113,8 +136,7 @@ class VideoWidget(QtWidgets.QWidget):
         self._geom()
         if self._scale <= 0:
             return 0.0, 0.0
-        return ((pos.x() - self._ox) / self._scale,
-                (pos.y() - self._oy) / self._scale)
+        return ((pos.x() - self._ox) / self._scale, (pos.y() - self._oy) / self._scale)
 
     def _to_image(self, pos):
         self._geom()
@@ -142,8 +164,9 @@ class VideoWidget(QtWidgets.QWidget):
         s = self._fit_scale() * self._zoom
         over_x = max(0.0, (self._iw * s - W) / 2.0)
         over_y = max(0.0, (self._ih * s - H) / 2.0)
-        self._pan = QtCore.QPointF(max(-over_x, min(over_x, self._pan.x())),
-                                   max(-over_y, min(over_y, self._pan.y())))
+        self._pan = QtCore.QPointF(
+            max(-over_x, min(over_x, self._pan.x())), max(-over_y, min(over_y, self._pan.y()))
+        )
 
     # ----- zoom / pan API -----
     def get_view(self):
@@ -158,7 +181,7 @@ class VideoWidget(QtWidgets.QWidget):
     def _zoom_at(self, pos, factor):
         if not self._pixmap:
             return
-        bx, by = self._img_at(pos)                 # point image sous le curseur (avant)
+        bx, by = self._img_at(pos)  # point image sous le curseur (avant)
         new_zoom = max(1.0, min(60.0, self._zoom * factor))
         if abs(new_zoom - self._zoom) < 1e-6:
             return
@@ -170,8 +193,7 @@ class VideoWidget(QtWidgets.QWidget):
         if self._zoom <= 1.0001:
             self._pan = QtCore.QPointF(0.0, 0.0)
         else:
-            self._pan = QtCore.QPointF(pos.x() - base_x - bx * s,
-                                       pos.y() - base_y - by * s)
+            self._pan = QtCore.QPointF(pos.x() - base_x - bx * s, pos.y() - base_y - by * s)
         self._clamp_pan()
         self.update()
         self.viewChanged.emit()
@@ -225,13 +247,16 @@ class VideoWidget(QtWidgets.QWidget):
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor(20, 20, 22))
+        p.fillRect(self.rect(), ui_color(20, 20, 22))
         if not self._pixmap:
-            p.setPen(QtGui.QColor(150, 150, 150))
-            p.drawText(self.rect(), Qt.AlignCenter,
-                       "Glisse ici une video, une image, un dossier, un .specialized\n"
-                       "ou un .sidecar de calques (overlays)\n\n"
-                       "(ou depose un fichier sur l'icone de l'exe)")
+            p.setPen(ui_color(150, 150, 150))
+            p.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "Glisse ici une video, une image, un dossier, un .specialized\n"
+                "ou un .sidecar de calques (overlays)\n\n"
+                "(ou depose un fichier sur l'icone de l'exe)",
+            )
             return
         self._geom()
         target = QtCore.QRectF(self._ox, self._oy, self._iw * self._scale, self._ih * self._scale)
@@ -241,7 +266,7 @@ class VideoWidget(QtWidgets.QWidget):
         self._draw_overlays(p)
 
         # marqueurs de clics de la frame courante
-        for (mx, my, mi) in self._markers:
+        for mx, my, mi in self._markers:
             wp = self._w(mx, my)
             wx, wy = wp.x(), wp.y()
             p.setPen(QtGui.QPen(QtGui.QColor(0, 230, 90), 1.5))
@@ -261,7 +286,9 @@ class VideoWidget(QtWidgets.QWidget):
             p.drawLine(QtCore.QLineF(wx, target.top(), wx, target.bottom()))
             # texte "x= y= v=" en haut-gauche de la vue (vert), valeur si connue
             txt = self._probe_txt or f"x= {ix}   y= {iy}"
-            f = p.font(); f.setBold(True); p.setFont(f)
+            f = p.font()
+            f.setBold(True)
+            p.setFont(f)
             p.setPen(QtGui.QColor(0, 0, 0))
             p.drawText(11, 21, txt)
             p.setPen(QtGui.QColor(0, 230, 90))
@@ -271,12 +298,12 @@ class VideoWidget(QtWidgets.QWidget):
         if self._roi is not None and self._roi[2] > 0 and self._roi[3] > 0:
             rx, ry, rw, rh = self._roi
             rect = QtCore.QRectF(self._w(rx, ry), self._w(rx + rw, ry + rh))
-            _rc = (QtGui.QColor(40, 220, 90) if self._roi_green
-                   else QtGui.QColor(255, 220, 40))
+            _rc = QtGui.QColor(40, 220, 90) if self._roi_green else QtGui.QColor(255, 220, 40)
             pen = QtGui.QPen(_rc, 1.5, Qt.DashLine)
             pen.setCosmetic(True)
             p.setPen(pen)
-            _fill = QtGui.QColor(_rc); _fill.setAlpha(30)
+            _fill = QtGui.QColor(_rc)
+            _fill.setAlpha(30)
             p.setBrush(_fill)
             p.drawRect(rect)
 
@@ -295,7 +322,9 @@ class VideoWidget(QtWidgets.QWidget):
                 p.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0), 3))
                 p.setBrush(QtGui.QColor(0, 230, 90))
                 p.drawEllipse(wp, 6, 6)
-                label = f"({px}, {py})  {float(value):.3f}" if value is not None else f"({px}, {py})"
+                label = (
+                    f"({px}, {py})  {float(value):.3f}" if value is not None else f"({px}, {py})"
+                )
                 p.setPen(QtGui.QColor(0, 0, 0))
                 p.drawText(wp + QtCore.QPointF(9, -5), label)
                 p.setPen(QtGui.QColor(0, 230, 90))
@@ -314,18 +343,24 @@ class VideoWidget(QtWidgets.QWidget):
             for i in range(1, len(pts_w)):
                 p.setPen(QtGui.QPen(QtGui.QColor(255, 120, 0), 2))
                 p.drawLine(pts_w[i - 1], pts_w[i])
-                x1, y1 = self._ruler_pts[i - 1]; x2, y2 = self._ruler_pts[i]
+                x1, y1 = self._ruler_pts[i - 1]
+                x2, y2 = self._ruler_pts[i]
                 dist = math.hypot(x2 - x1, y2 - y1)
-                mid = QtCore.QPointF((pts_w[i-1].x() + pts_w[i].x()) / 2,
-                                     (pts_w[i-1].y() + pts_w[i].y()) / 2)
+                mid = QtCore.QPointF(
+                    (pts_w[i - 1].x() + pts_w[i].x()) / 2, (pts_w[i - 1].y() + pts_w[i].y()) / 2
+                )
                 p.setPen(QtGui.QColor(0, 0, 0))
                 p.drawText(mid + QtCore.QPointF(7, 1), f"{dist:.1f}px")
                 p.setPen(QtGui.QColor(255, 120, 0))
                 p.drawText(mid + QtCore.QPointF(6, 0), f"{dist:.1f}px")
             if len(pts_w) >= 2:
-                total = sum(math.hypot(self._ruler_pts[i][0] - self._ruler_pts[i-1][0],
-                                       self._ruler_pts[i][1] - self._ruler_pts[i-1][1])
-                            for i in range(1, len(self._ruler_pts)))
+                total = sum(
+                    math.hypot(
+                        self._ruler_pts[i][0] - self._ruler_pts[i - 1][0],
+                        self._ruler_pts[i][1] - self._ruler_pts[i - 1][1],
+                    )
+                    for i in range(1, len(self._ruler_pts))
+                )
                 last = pts_w[-1]
                 p.setPen(QtGui.QColor(0, 0, 0))
                 p.drawText(last + QtCore.QPointF(9, 17), f"Σ {total:.1f}px")
@@ -381,8 +416,10 @@ class VideoWidget(QtWidgets.QWidget):
                 if tx.get("auto") and pts:
                     anchor = QtCore.QPointF(pts[0].x() + 6, pts[0].y() - 6)
                 elif pts:
-                    anchor = QtCore.QPointF(pts[0].x() + tx.get("x", 0) * self._scale,
-                                            pts[0].y() + tx.get("y", 0) * self._scale)
+                    anchor = QtCore.QPointF(
+                        pts[0].x() + tx.get("x", 0) * self._scale,
+                        pts[0].y() + tx.get("y", 0) * self._scale,
+                    )
                 else:
                     anchor = self._w(tx.get("x", 0), tx.get("y", 0))
                 font = p.font()
@@ -395,7 +432,7 @@ class VideoWidget(QtWidgets.QWidget):
         if not self._pixmap:
             return
         self.setFocus()
-        if e.button() == Qt.MiddleButton:          # clic molette -> panoramique
+        if e.button() == Qt.MiddleButton:  # clic molette -> panoramique
             self._panning = True
             self._pan_moved = False
             self._pan_anchor = e.position()
@@ -434,8 +471,7 @@ class VideoWidget(QtWidgets.QWidget):
             d = e.position() - self._pan_anchor
             if abs(d.x()) + abs(d.y()) > 3:
                 self._pan_moved = True
-            self._pan = QtCore.QPointF(self._pan_orig.x() + d.x(),
-                                       self._pan_orig.y() + d.y())
+            self._pan = QtCore.QPointF(self._pan_orig.x() + d.x(), self._pan_orig.y() + d.y())
             self._clamp_pan()
             self.update()
             self.viewChanged.emit()
@@ -469,8 +505,10 @@ class VideoWidget(QtWidgets.QWidget):
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.MiddleButton and self._panning:
             self._panning = False
-            self.setCursor(Qt.CrossCursor if self._tool_mode in ("line", "ruler") else Qt.ArrowCursor)
-            if not self._pan_moved:                # clic molette sans glissement -> ajuster
+            self.setCursor(
+                Qt.CrossCursor if self._tool_mode in ("line", "ruler") else Qt.ArrowCursor
+            )
+            if not self._pan_moved:  # clic molette sans glissement -> ajuster
                 self.fit()
             return
         if e.button() == Qt.LeftButton and self._left_down:
@@ -483,7 +521,7 @@ class VideoWidget(QtWidgets.QWidget):
                         self.lineChanged.emit(x1, y1, x2, y2)
                 self._line_start = None
                 return
-            if self._drawing_roi:                  # rectangle dessine -> ROI (toggle auto)
+            if self._drawing_roi:  # rectangle dessine -> ROI (toggle auto)
                 self._drawing_roi = False
                 self._roi_drag = None
                 if self._roi and self._roi[2] >= 2 and self._roi[3] >= 2:
@@ -504,6 +542,3 @@ class VideoWidget(QtWidgets.QWidget):
         self._hover = None
         self.hovered.emit(-1, -1)
         self.update()
-
-
-

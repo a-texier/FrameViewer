@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Convert large media sources in a QThread so the UI remains responsive."""
+
 import os
 
 import cv2
@@ -8,11 +9,12 @@ from PySide6 import QtCore
 
 from frameviewer.core.io_utils import imwrite_unicode
 from frameviewer.core.feature_registry import operation_for_kind
-from frameviewer.core.pipeline import render_frame, to_intensity
+from frameviewer.core.pipeline import native_intensity, render_frame, to_intensity
 from frameviewer.core.sources import ImageSequenceSource, SpecializedSource, VideoSource
 
 SpecializedWriter = operation_for_kind("sequence_format", "writer")
 type_img_for_dtype = operation_for_kind("sequence_format", "type_for_dtype")
+
 
 class ConvertWorker(QtCore.QThread):
     """Convert a source to rendered PNG, raw PNG, MP4, or an optional format.
@@ -20,18 +22,34 @@ class ConvertWorker(QtCore.QThread):
     The source is reopened inside the worker to avoid sharing handles with the
     UI thread.
     """
-    progress = QtCore.Signal(int, int)        # (current, total)
-    finished_ok = QtCore.Signal(str, int)     # (output, written count)
+
+    progress = QtCore.Signal(int, int)  # (current, total)
+    finished_ok = QtCore.Signal(str, int)  # (output, written count)
     failed = QtCore.Signal(str)
 
-    def __init__(self, src_kind, src_arg, out_path, mode, lo, hi, lut_data,
-                 cube_lut, cube_size, step, full_range,
-                 filters=None, fps=25.0, parent=None, temporal_sub_k=0):
+    def __init__(
+        self,
+        src_kind,
+        src_arg,
+        out_path,
+        mode,
+        lo,
+        hi,
+        lut_data,
+        cube_lut,
+        cube_size,
+        step,
+        full_range,
+        filters=None,
+        fps=25.0,
+        parent=None,
+        temporal_sub_k=0,
+    ):
         super().__init__(parent)
-        self.src_kind = src_kind    # "specialized" | "video" | "images"
-        self.src_arg = src_arg      # One media path or a list of image paths.
+        self.src_kind = src_kind  # "specialized" | "video" | "images"
+        self.src_arg = src_arg  # One media path or a list of image paths.
         self.out_path = out_path
-        self.mode = mode            # "png8" | "png16" | "mp4" | "specialized"
+        self.mode = mode  # "png8" | "png16" | "mp4" | "specialized"
         self.lo, self.hi = lo, hi
         self.lut_data = lut_data
         self.cube_lut, self.cube_size = cube_lut, cube_size
@@ -63,8 +81,9 @@ class ConvertWorker(QtCore.QThread):
         except Exception as ex:
             self.failed.emit(str(ex))
             return
-        writer = None          # cv2.VideoWriter (mp4)
-        specialized_w = None           # SpecializedWriter (specialized)
+        writer = None  # cv2.VideoWriter (mp4)
+        specialized_w = None  # SpecializedWriter (specialized)
+        ref_src = None  # 2nd reader for N-k: avoids a backward seek per frame
         try:
             if self.mode in ("mp4", "specialized"):
                 d = os.path.dirname(self.out_path)
@@ -84,22 +103,23 @@ class ConvertWorker(QtCore.QThread):
                 # to rendered exports; PNG16 and SPECIALIZED keep their documented raw
                 # data contract instead of clipping signed differences.
                 if self.temporal_sub_k and self.mode in ("png8", "mp4"):
-                    ref = src.get(max(0, i - self.temporal_sub_k))
+                    if ref_src is None:
+                        ref_src = self._open_source()
+                    ref = ref_src.get(max(0, i - self.temporal_sub_k))
                     if ref is not None:
                         current = to_intensity(raw).astype(np.float32)
                         previous = to_intensity(ref).astype(np.float32)
                         if current.shape == previous.shape:
                             raw = current - previous
                 if self.mode == "specialized":
-                    inten = to_intensity(raw)
-                    if inten.ndim == 3 and inten.shape[2] == 1:
-                        inten = inten[:, :, 0]
-                    if not np.issubdtype(inten.dtype, np.integer):
-                        inten = np.clip(inten, 0, 255).astype(np.uint8)  # Media to 8-bit.
+                    # Native sample type is kept (uint16, float32...): this
+                    # export documents raw intensity, never an 8-bit squeeze.
+                    inten = native_intensity(raw)
                     if specialized_w is None:
                         rows, cols = inten.shape[:2]
-                        specialized_w = SpecializedWriter(self.out_path, rows, cols,
-                                          type_img_for_dtype(inten.dtype), channels=1)
+                        specialized_w = SpecializedWriter(
+                            self.out_path, rows, cols, type_img_for_dtype(inten.dtype), channels=1
+                        )
                     specialized_w.write(inten)
                     written += 1
                 elif self.mode == "png16":
@@ -112,9 +132,16 @@ class ConvertWorker(QtCore.QThread):
                     if imwrite_unicode(out, img):
                         written += 1
                 else:
-                    img = render_frame(raw, self.lo, self.hi, self.lut_data,
-                                       self.cube_lut, self.cube_size,
-                                       self.full_range, self.filters)
+                    img = render_frame(
+                        raw,
+                        self.lo,
+                        self.hi,
+                        self.lut_data,
+                        self.cube_lut,
+                        self.cube_size,
+                        self.full_range,
+                        self.filters,
+                    )
                     if self.mode == "mp4":
                         if img.ndim == 2:
                             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -138,6 +165,9 @@ class ConvertWorker(QtCore.QThread):
             if specialized_w is not None:
                 specialized_w.close()
                 specialized_w = None
+            if ref_src is not None:
+                ref_src.close()
+                ref_src = None
             src.close()
         except Exception as ex:
             try:
@@ -150,10 +180,12 @@ class ConvertWorker(QtCore.QThread):
                     specialized_w.close()
             except Exception:
                 pass
-            try:
-                src.close()
-            except Exception:
-                pass
+            for reader in (ref_src, src):
+                try:
+                    if reader is not None:
+                        reader.close()
+                except Exception:
+                    pass
             self.failed.emit(str(ex))
             return
         if self._stop:

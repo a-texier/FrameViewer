@@ -1,4 +1,5 @@
 """Interactive, action-driven onboarding for FrameViewer."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -58,8 +59,7 @@ class TutorialFileList(QtWidgets.QListWidget):
     def set_drag_enabled(self, item, enabled: bool) -> None:
         item.setData(self.DRAG_ENABLED_ROLE, enabled)
         item.setFlags(
-            item.flags() | Qt.ItemIsDragEnabled
-            if enabled else item.flags() & ~Qt.ItemIsDragEnabled
+            item.flags() | Qt.ItemIsDragEnabled if enabled else item.flags() & ~Qt.ItemIsDragEnabled
         )
         item.setForeground(QtGui.QColor("#ededf2" if enabled else "#777780"))
 
@@ -102,9 +102,7 @@ class TutorialExplorer(QtWidgets.QDialog):
             self.style().standardIcon(QtWidgets.QStyle.SP_DirIcon),
             "Annotations YOLO",
         )
-        self._annotations.setData(
-            TutorialFileList.PATH_ROLE, str(workspace / "annotations_yolo")
-        )
+        self._annotations.setData(TutorialFileList.PATH_ROLE, str(workspace / "annotations_yolo"))
         self._annotations.setData(TutorialFileList.DRAG_ENABLED_ROLE, True)
         self._annotations.setToolTip(str(workspace / "annotations_yolo"))
         self._showcase_csv = self.list.add_path(
@@ -199,7 +197,7 @@ class TutorialBubble(QtWidgets.QFrame):
             self.waiting.setVisible(not ready)
         self.previous.setEnabled(index > 0)
         self.next.setEnabled(ready)
-        self.next.setText(tr("Terminer") + "  ✓" if index == total - 1 else tr("Suivant") + "  →")
+        self.next.setText(tr("Terminer") if index == total - 1 else tr("Suivant"))
         self.adjustSize()
 
 
@@ -369,7 +367,9 @@ class FrameViewerTutorial(QtCore.QObject):
             QtCore.QRect(0, 0, full.width(), max(0, hole.top())),
             QtCore.QRect(0, hole.bottom() + 1, full.width(), max(0, full.bottom() - hole.bottom())),
             QtCore.QRect(0, hole.top(), max(0, hole.left()), hole.height()),
-            QtCore.QRect(hole.right() + 1, hole.top(), max(0, full.right() - hole.right()), hole.height()),
+            QtCore.QRect(
+                hole.right() + 1, hole.top(), max(0, full.right() - hole.right()), hole.height()
+            ),
         )
         for mask, rect in zip(self._masks, rects):
             mask.setGeometry(rect)
@@ -437,8 +437,12 @@ class FrameViewerTutorial(QtCore.QObject):
             return
         if plugin_data and self._plugin_has_input(*plugin_data):
             return
-        if (not annotations and not ir and not plugin_data
-                and is_tutorial_source(self.window.source, "traffic_rgb")):
+        if (
+            not annotations
+            and not ir
+            and not plugin_data
+            and is_tutorial_source(self.window.source, "traffic_rgb")
+        ):
             return
         if annotations:
             self.explorer.reveal_annotations()
@@ -458,13 +462,16 @@ class FrameViewerTutorial(QtCore.QObject):
             return
         title = self.steps[self.index].title
         rgb_done = title == "Deposer Trafic RGB" and is_tutorial_source(
-            self.window.source, "traffic_rgb")
+            self.window.source, "traffic_rgb"
+        )
         annotations_done = title == "Deposer les annotations YOLO" and self._annotations_loaded()
         ir_done = title == "Deposer Trafic IR" and self._satellite_has("traffic_ir")
         showcase_done = title == "Deposer le CSV des boites" and self._plugin_has_input(
-            "demo_showcase", "boxes")
+            "demo_showcase", "boxes"
+        )
         kpts_done = title == "Deposer le CSV des correspondances" and self._plugin_has_input(
-            "demo_2_multivue_kpts", "pairs_csv")
+            "demo_2_multivue_kpts", "pairs_csv"
+        )
         if kpts_done:
             self._connect_multiview_tutorial_input()
         if rgb_done or annotations_done or ir_done or showcase_done or kpts_done:
@@ -507,9 +514,14 @@ class FrameViewerTutorial(QtCore.QObject):
             contracts = self.window._plugin_view_state(plugin_id)["contracts"]
         except (KeyError, TypeError):
             return ""
-        return next((group.get("files", {}).get(input_name, "")
-                     for group in contracts
-                     if group.get("files", {}).get(input_name)), "")
+        return next(
+            (
+                group.get("files", {}).get(input_name, "")
+                for group in contracts
+                if group.get("files", {}).get(input_name)
+            ),
+            "",
+        )
 
     def _connect_multiview_tutorial_input(self) -> None:
         """Partage le CSV entre les deux vues pendant ce tutoriel seulement."""
@@ -524,8 +536,9 @@ class FrameViewerTutorial(QtCore.QObject):
             contracts = state.setdefault("contracts", [])
             if any(item.get("files", {}).get("pairs_csv") == path for item in contracts):
                 continue
-            target = next((item for item in contracts
-                           if not item.get("files", {}).get("pairs_csv")), None)
+            target = next(
+                (item for item in contracts if not item.get("files", {}).get("pairs_csv")), None
+            )
             if target is None:
                 target = {"name": "", "visible": True, "files": {}}
                 contracts.append(target)
@@ -536,8 +549,10 @@ class FrameViewerTutorial(QtCore.QObject):
 
     def _histogram_adjusted(self) -> bool:
         initial_lo, initial_hi = self._initial_hist_window
-        moved_handle = (abs(self.window.hist.lo - initial_lo) > 1e-6
-                        or abs(self.window.hist.hi - initial_hi) > 1e-6)
+        moved_handle = (
+            abs(self.window.hist.lo - initial_lo) > 1e-6
+            or abs(self.window.hist.hi - initial_hi) > 1e-6
+        )
         return moved_handle or self.window.lut_hist_combo.currentIndex() != self._initial_lut
 
     def _prepare_histogram_step(self) -> None:
@@ -553,8 +568,10 @@ class FrameViewerTutorial(QtCore.QObject):
         self._link_navigation_initial = self._visible_view_frames()
 
     def _linked_navigation_done(self) -> bool:
-        return (self._linked_canvas_clicked
-                and self._visible_view_frames() != self._link_navigation_initial)
+        return (
+            self._linked_canvas_clicked
+            and self._visible_view_frames() != self._link_navigation_initial
+        )
 
     def _plugin_dock_visible(self, plugin_id: str) -> bool:
         dock = getattr(self.window, "_plugin_docks", {}).get(plugin_id)
@@ -610,51 +627,74 @@ class FrameViewerTutorial(QtCore.QObject):
         explorer_target = lambda: self.explorer.list if self.explorer else central()
         return [
             TutorialStep(
-                "Orientation", "Les zones de travail",
+                "Orientation",
+                "Les zones de travail",
                 "La barre regroupe les commandes, le canvas affiche la source, les mini-barres naviguent par vue et les panneaux restent ancrables.",
-                lambda: w.findChild(QtWidgets.QToolBar, "main_toolbar")),
+                lambda: w.findChild(QtWidgets.QToolBar, "main_toolbar"),
+            ),
             TutorialStep(
-                "Orientation", "Calques, histogramme et parametres",
+                "Orientation",
+                "Calques, histogramme et parametres",
                 "Le panneau droit contient Hist / Calque, Plugins et Parametres. Chaque onglet agit sur la vue selectionnee ou sur toutes les vues lorsque cela est precise.",
-                lambda: w.right_tab, prepare=lambda: self._show_right(0)),
+                lambda: w.right_tab,
+                prepare=lambda: self._show_right(0),
+            ),
             TutorialStep(
-                "Explorateur", "Donnees de demonstration",
+                "Explorateur",
+                "Donnees de demonstration",
                 "Les donnees sont des copies ecrites dans le workspace utilisateur. Seul Trafic RGB est deposable maintenant; IR et les CSV seront deverrouilles au moment utile.",
-                explorer_target, prepare=lambda: self._show_explorer()),
+                explorer_target,
+                prepare=lambda: self._show_explorer(),
+            ),
             TutorialStep(
-                "Chargement", "Deposer Trafic RGB",
+                "Chargement",
+                "Deposer Trafic RGB",
                 "Glisse Trafic RGB depuis le pseudo-explorateur vers la vue unique. La fenetre de fichiers se fermera des que la source sera chargee.",
-                central, prepare=lambda: self._show_explorer(),
+                central,
+                prepare=lambda: self._show_explorer(),
                 ready=lambda: is_tutorial_source(w.source, "traffic_rgb"),
-                ready_text="glisser Trafic RGB dans le canvas"),
+                ready_text="glisser Trafic RGB dans le canvas",
+            ),
             TutorialStep(
-                "Formats", "Sources acceptees",
+                "Formats",
+                "Sources acceptees",
                 "Les dossiers d'images, images isolees, MP4, WebM, TIFF, JPEG, PNG et YUV sont natifs. L'Aide enumere les extensions optionnelles vraiment disponibles.",
-                lambda: w.open_file_btn),
+                lambda: w.open_file_btn,
+            ),
             TutorialStep(
-                "Canvas", "Zoom, panoramique et ajustement",
+                "Canvas",
+                "Zoom, panoramique et ajustement",
                 "Realise les trois gestes dans l'ordre de ton choix. Chaque case se coche des que le geste est detecte.",
-                lambda: w.view, ready=lambda: all(self._canvas_actions.values()),
+                lambda: w.view,
+                ready=lambda: all(self._canvas_actions.values()),
                 ready_text="realiser les trois gestes",
                 progress=lambda: [
                     ("Zoomer avec la molette", self._canvas_actions["wheel"]),
                     ("Deplacer avec le bouton central maintenu", self._canvas_actions["pan"]),
                     ("Recadrer avec un clic central", self._canvas_actions["fit"]),
-                ]),
+                ],
+            ),
             TutorialStep(
-                "Rendu", "Histogramme et LUT",
+                "Rendu",
+                "Histogramme et LUT",
                 "Toute la zone est mise en avant : l'histogramme mesure la vue active et le bloc Rendu applique LUT, contraste et filtres. Deplace simplement la barre gauche ou droite de l'histogramme; choisir une LUT predefinie fonctionne aussi.",
-                lambda: w.hist_render_panel, prepare=self._prepare_histogram_step,
+                lambda: w.hist_render_panel,
+                prepare=self._prepare_histogram_step,
                 ready=self._histogram_adjusted,
-                ready_text="deplacer une poignee de l'histogramme ou changer la LUT"),
+                ready_text="deplacer une poignee de l'histogramme ou changer la LUT",
+            ),
             TutorialStep(
-                "Parametres", "Ouvrir l'onglet Parametres",
+                "Parametres",
+                "Ouvrir l'onglet Parametres",
                 "Clique sur Parametres. Les commandes REC clics et Extraction IN / OUT se trouvent dans cet onglet.",
-                lambda: w.right_tab.tabBar(), prepare=self._show_right_dock,
+                lambda: w.right_tab.tabBar(),
+                prepare=self._show_right_dock,
                 ready=lambda: w.right_dock.isVisible() and w.right_tab.currentIndex() == 2,
-                ready_text="cliquer sur l'onglet Parametres"),
+                ready_text="cliquer sur l'onglet Parametres",
+            ),
             TutorialStep(
-                "REC clics", "Activer et enregistrer un point",
+                "REC clics",
+                "Activer et enregistrer un point",
                 lambda: (
                     "Active REC clics puis clique dans l'image. Le point est ajoute immediatement dans :\n"
                     + (w.clicks_path or "<dossier de la source>/<nom_source>_clicks.txt")
@@ -663,9 +703,11 @@ class FrameViewerTutorial(QtCore.QObject):
                 lambda: w.clicks_group,
                 prepare=lambda: self._show_params_widget(w.clicks_group),
                 ready=lambda: w.rec_btn.isChecked() and len(w.clicks) > self._initial_clicks,
-                ready_text="activer REC clics puis cliquer dans l'image"),
+                ready_text="activer REC clics puis cliquer dans l'image",
+            ),
             TutorialStep(
-                "REC clics", "Arreter l'enregistrement",
+                "REC clics",
+                "Arreter l'enregistrement",
                 lambda: (
                     "Le point est enregistre dans "
                     + (w.clicks_path or "le fichier de clics")
@@ -674,16 +716,20 @@ class FrameViewerTutorial(QtCore.QObject):
                 lambda: w.rec_btn,
                 prepare=lambda: self._show_params_widget(w.clicks_group),
                 ready=lambda: not w.rec_btn.isChecked() and len(w.clicks) > self._initial_clicks,
-                ready_text="decocher REC clics"),
+                ready_text="decocher REC clics",
+            ),
             TutorialStep(
-                "Extraction", "Marquer le debut IN",
+                "Extraction",
+                "Marquer le debut IN",
                 "Place la timeline sur la frame de debut souhaitee, puis clique IN.",
                 lambda: w.extraction_group,
                 prepare=lambda: self._show_params_widget(w.extraction_group),
                 ready=lambda: w._extract_start >= 0,
-                ready_text="choisir une frame puis cliquer IN"),
+                ready_text="choisir une frame puis cliquer IN",
+            ),
             TutorialStep(
-                "Extraction", "Naviguer puis marquer OUT",
+                "Extraction",
+                "Naviguer puis marquer OUT",
                 "La zone IN / OUT reste eclairee. Deplace d'abord la timeline sous les images, puis clique OUT ici. OUT doit etre strictement apres IN.",
                 lambda: w.extraction_group,
                 prepare=lambda: self._show_params_widget(w.extraction_group),
@@ -691,192 +737,273 @@ class FrameViewerTutorial(QtCore.QObject):
                 ready_text="deplacer la timeline puis cliquer OUT",
                 progress=lambda: [
                     ("IN defini", w._extract_start >= 0),
-                    ("Timeline placee apres IN", w._extract_start >= 0 and w.cur > w._extract_start),
+                    (
+                        "Timeline placee apres IN",
+                        w._extract_start >= 0 and w.cur > w._extract_start,
+                    ),
                     ("OUT defini apres IN", w._extract_end > w._extract_start >= 0),
-                ]),
+                ],
+            ),
             TutorialStep(
-                "Extraction", "Extraire ou ajouter un morceau",
+                "Extraction",
+                "Extraire ou ajouter un morceau",
                 "Extraire ouvre directement l'export de la plage IN/OUT. Pour construire plusieurs plages, clique Ajouter morceau; definis ensuite un nouveau couple IN/OUT.",
                 lambda: w.extraction_group,
                 prepare=lambda: self._show_params_widget(w.extraction_group),
                 ready=lambda: bool(w._segments),
-                ready_text="cliquer Ajouter morceau pour cette demonstration"),
+                ready_text="cliquer Ajouter morceau pour cette demonstration",
+            ),
             TutorialStep(
-                "Extraction", "Liste et export des morceaux",
+                "Extraction",
+                "Liste et export des morceaux",
                 "La liste montre toutes les plages ajoutees. Extraire morceaux ouvre un export unique dans le format choisi et traite toutes les plages en une fois.",
                 lambda: w.extraction_group,
-                prepare=lambda: self._show_params_widget(w.extraction_group)),
+                prepare=lambda: self._show_params_widget(w.extraction_group),
+            ),
             TutorialStep(
-                "Annotations", "Ouvrir Hist / Calque",
+                "Annotations",
+                "Ouvrir Hist / Calque",
                 "Les fichiers YOLO .txt sont des annotations natives, pas des donnees plugin. Ouvre donc Hist / Calque avant leur chargement.",
-                lambda: w.right_tab.tabBar(), prepare=self._show_right_dock,
+                lambda: w.right_tab.tabBar(),
+                prepare=self._show_right_dock,
                 ready=lambda: w.right_dock.isVisible() and w.right_tab.currentIndex() == 0,
-                ready_text="cliquer sur Hist / Calque"),
+                ready_text="cliquer sur Hist / Calque",
+            ),
             TutorialStep(
-                "Annotations", "Deposer les annotations YOLO",
+                "Annotations",
+                "Deposer les annotations YOLO",
                 "Glisse Annotations YOLO sur le canvas. Chaque .txt porte le meme nom que son image et classes.txt nomme la classe vehicle.",
-                central, prepare=lambda: (self._show_right(0), self._show_explorer(annotations=True)),
+                central,
+                prepare=lambda: (self._show_right(0), self._show_explorer(annotations=True)),
                 ready=self._annotations_loaded,
-                ready_text="glisser Annotations YOLO dans le canvas"),
+                ready_text="glisser Annotations YOLO dans le canvas",
+            ),
             TutorialStep(
-                "Annotations", "Masquer uniquement le calque YOLO",
+                "Annotations",
+                "Masquer uniquement le calque YOLO",
                 "Dans Hist / Calque, decoche annotations_yolo (ou son enfant vehicle). Le bouton global Afficher les overlays n'est pas utilise : les overlays des plugins restent independants.",
-                lambda: w.layer_list, prepare=lambda: self._show_right(0),
+                lambda: w.layer_list,
+                prepare=lambda: self._show_right(0),
                 ready=lambda: self._annotations_loaded() and not self._annotation_layers_visible(),
-                ready_text="decocher le calque annotations_yolo"),
+                ready_text="decocher le calque annotations_yolo",
+            ),
             TutorialStep(
-                "Plugin monovue", "Ouvrir Plugins",
+                "Plugin monovue",
+                "Ouvrir Plugins",
                 "Laisse le calque YOLO masque pour eviter toute superposition. Ouvre Plugins; les deux demos doivent etre Inactif et sans fichier restaure.",
-                lambda: w.right_tab.tabBar(), prepare=self._show_right_dock,
-                ready=lambda: (w.right_dock.isVisible() and w.right_tab.currentIndex() == 1
-                               and not self._annotation_layers_visible()
-                               and self._demo_plugins_inactive()),
-                ready_text="laisser YOLO masque puis cliquer sur Plugins"),
+                lambda: w.right_tab.tabBar(),
+                prepare=self._show_right_dock,
+                ready=lambda: (
+                    w.right_dock.isVisible()
+                    and w.right_tab.currentIndex() == 1
+                    and not self._annotation_layers_visible()
+                    and self._demo_plugins_inactive()
+                ),
+                ready_text="laisser YOLO masque puis cliquer sur Plugins",
+            ),
             TutorialStep(
-                "Plugin monovue", "Activer le showcase",
+                "Plugin monovue",
+                "Activer le showcase",
                 "Clique Actif sur Demo showcase. Sans fichier dans l'entree boxes, son overlay reste vide.",
                 lambda: self._plugin_control("demo_showcase", "plugin_active"),
                 prepare=lambda: self._show_plugin_card("demo_showcase"),
                 ready=lambda: self._enable_plugin("demo_showcase"),
-                ready_text="cocher Actif sur Demo showcase"),
+                ready_text="cocher Actif sur Demo showcase",
+            ),
             TutorialStep(
-                "Plugin monovue", "Deplier la carte",
+                "Plugin monovue",
+                "Deplier la carte",
                 "Clique sur la fleche de la carte pour afficher son entree boxes, son apercu et ses actions.",
                 lambda: self._plugin_control("demo_showcase", "plugin_expand"),
                 prepare=lambda: self._show_plugin_card("demo_showcase"),
                 ready=lambda: self._plugin_expanded("demo_showcase"),
-                ready_text="deplier la carte Demo showcase"),
+                ready_text="deplier la carte Demo showcase",
+            ),
             TutorialStep(
-                "Plugin monovue", "Deposer le CSV des boites",
+                "Plugin monovue",
+                "Deposer le CSV des boites",
                 "Glisse CSV boites du plugin dans l'entree boxes. Ce fichier est fourni dans le pseudo-explorateur, mais aucune entree n'est remplie automatiquement.",
                 lambda: self._plugin_input_zone("demo_showcase", "boxes"),
                 prepare=lambda: self._show_explorer(plugin_data=("demo_showcase", "boxes")),
                 ready=lambda: self._plugin_has_input("demo_showcase", "boxes"),
-                ready_text="deposer le CSV dans l'entree boxes"),
+                ready_text="deposer le CSV dans l'entree boxes",
+            ),
             TutorialStep(
-                "Plugin monovue", "Ouvrir le panneau du plugin",
+                "Plugin monovue",
+                "Ouvrir le panneau du plugin",
                 "Clique Ouvrir le panneau (dock). Il contient opacite globale, remplissage, epaisseur des boites et epaisseur de grille.",
                 lambda: self._plugin_control("demo_showcase", "plugin_open_dock"),
                 prepare=lambda: self._show_plugin_card("demo_showcase"),
                 ready=lambda: self._plugin_dock_visible("demo_showcase"),
-                ready_text="cliquer Ouvrir le panneau (dock)"),
+                ready_text="cliquer Ouvrir le panneau (dock)",
+            ),
             TutorialStep(
-                "Plugin monovue", "Regler puis exporter",
+                "Plugin monovue",
+                "Regler puis exporter",
                 "Teste les quatre reglages du dock. La capture et les exports peuvent graver les overlays visibles dans l'image produite.",
-                lambda: self._plugin_dock("demo_showcase")),
+                lambda: self._plugin_dock("demo_showcase"),
+            ),
             TutorialStep(
-                "Console", "Ouvrir les logs plugins",
+                "Console",
+                "Ouvrir les logs plugins",
                 "Le bouton Console ouvre les logs, prints, erreurs, diagnostics et exports de debug, isoles par plugin. Clique-le maintenant.",
                 lambda: w._plugins_panel.findChild(QtWidgets.QWidget, "plugin_console_button"),
                 prepare=lambda: self._show_plugin_card("demo_showcase"),
                 ready=self._plugin_console_visible,
-                ready_text="cliquer sur Console"),
+                ready_text="cliquer sur Console",
+            ),
             TutorialStep(
-                "Configuration", "Dossiers et plugins personnels",
+                "Configuration",
+                "Dossiers et plugins personnels",
                 "Config donne acces a settings.ini, au dossier de plugins utilisateur et a la documentation. Un dossier plugins voisin de l'executable est egalement detecte.",
-                lambda: w.config_btn, prepare=self._close_plugin_console),
+                lambda: w.config_btn,
+                prepare=self._close_plugin_console,
+            ),
             TutorialStep(
-                "Plugin monovue", "Desactiver le showcase",
+                "Plugin monovue",
+                "Desactiver le showcase",
                 "Avant la multivue, decoche Actif sur Demo showcase. Aucun overlay du plugin monovue ne doit rester sur les vues suivantes.",
                 lambda: self._plugin_control("demo_showcase", "plugin_active"),
                 prepare=lambda: self._show_plugin_card("demo_showcase"),
                 ready=lambda: not self._enable_plugin("demo_showcase"),
-                ready_text="decocher Actif sur Demo showcase"),
+                ready_text="decocher Actif sur Demo showcase",
+            ),
             TutorialStep(
-                "Multivue", "Choisir Empile haut / bas",
+                "Multivue",
+                "Choisir Empile haut / bas",
                 "La console est fermee. Utilise le bouton de disposition des vues et choisis Empile haut / bas.",
                 lambda: w.split_btn,
                 prepare=lambda: (self._close_plugin_console(), w.right_dock.hide()),
                 ready=lambda: w._split_canvas.mode() == "v2",
-                ready_text="choisir la disposition Empile haut / bas"),
+                ready_text="choisir la disposition Empile haut / bas",
+            ),
             TutorialStep(
-                "Multivue", "Deposer Trafic IR",
+                "Multivue",
+                "Deposer Trafic IR",
                 "Trafic IR est maintenant deverrouille. Glisse-le dans la vue inferieure; le plugin showcase etant inactif, il ne dessine rien.",
-                central, prepare=lambda: self._show_explorer(ir=True),
+                central,
+                prepare=lambda: self._show_explorer(ir=True),
                 ready=lambda: w._split_canvas.mode() == "v2" and self._satellite_has("traffic_ir"),
-                ready_text="glisser Trafic IR dans la vue inferieure"),
+                ready_text="glisser Trafic IR dans la vue inferieure",
+            ),
             TutorialStep(
-                "Liaison", "Meme base temporelle",
+                "Liaison",
+                "Meme base temporelle",
                 "Clique Lier, conserve Liaison active et les departs [0, 0], puis clique Appliquer. Les compteurs +/- et la saisie clavier sont actifs.",
                 lambda: w.link_btn,
                 ready=lambda: self._link_starts_are([0, 0]),
-                ready_text="appliquer la liaison [0, 0]"),
+                ready_text="appliquer la liaison [0, 0]",
+            ),
             TutorialStep(
-                "Liaison", "Tester un decalage",
+                "Liaison",
+                "Tester un decalage",
                 "Rouvre Lier : Liaison active et les anciennes valeurs restent memorisees. Utilise les fleches +/- ou saisis [2, 0], puis Appliquer. La vue haute commence a 2, celle du bas a 0.",
                 lambda: w.link_btn,
                 ready=lambda: self._link_starts_are([2, 0]),
-                ready_text="appliquer la liaison [2, 0]"),
+                ready_text="appliquer la liaison [2, 0]",
+            ),
             TutorialStep(
-                "Liaison", "Verifier la navigation synchronisee",
+                "Liaison",
+                "Verifier la navigation synchronisee",
                 "Clique d'abord dans une des deux vues, puis deplace sa mini-timeline. Les deux vues avancent ensemble en conservant exactement deux frames d'ecart.",
-                central, prepare=self._prepare_link_navigation_test,
+                central,
+                prepare=self._prepare_link_navigation_test,
                 ready=self._linked_navigation_done,
                 ready_text="cliquer une vue puis deplacer sa mini-timeline",
                 progress=lambda: [
                     ("Cliquer dans une vue", self._linked_canvas_clicked),
-                    ("Changer de frame", self._visible_view_frames() != self._link_navigation_initial),
-                ]),
+                    (
+                        "Changer de frame",
+                        self._visible_view_frames() != self._link_navigation_initial,
+                    ),
+                ],
+            ),
             TutorialStep(
-                "Liaison", "Revenir a [0, 0]",
+                "Liaison",
+                "Revenir a [0, 0]",
                 "Remets les departs a [0, 0] avant les correspondances. Le CSV contient des appariements pour chacune des frames 0 a 9 avec les deux vues au meme index.",
                 lambda: w.link_btn,
                 ready=lambda: self._link_starts_are([0, 0]),
-                ready_text="reappliquer [0, 0]"),
+                ready_text="reappliquer [0, 0]",
+            ),
             TutorialStep(
-                "Plugin multivue", "Rouvrir le panneau Plugins",
+                "Plugin multivue",
+                "Rouvrir le panneau Plugins",
                 "Ouvre le panneau droit puis l'onglet Plugins. Le plugin multivue doit encore etre Inactif.",
                 lambda: w.right_panel_btn,
-                ready=lambda: w.right_dock.isVisible() and w.right_tab.currentIndex() == 1
-                and not self._enable_plugin("demo_2_multivue_kpts"),
-                ready_text="ouvrir le panneau Plugins"),
+                ready=lambda: (
+                    w.right_dock.isVisible()
+                    and w.right_tab.currentIndex() == 1
+                    and not self._enable_plugin("demo_2_multivue_kpts")
+                ),
+                ready_text="ouvrir le panneau Plugins",
+            ),
             TutorialStep(
-                "Plugin multivue", "Activer les correspondances",
+                "Plugin multivue",
+                "Activer les correspondances",
                 "Clique Actif sur Demo 2 vues. Sans CSV depose, aucun point ni lien n'est dessine.",
                 lambda: self._plugin_control("demo_2_multivue_kpts", "plugin_active"),
                 prepare=lambda: self._show_plugin_card("demo_2_multivue_kpts"),
                 ready=lambda: self._enable_plugin("demo_2_multivue_kpts"),
-                ready_text="cocher Actif sur le plugin multivue"),
+                ready_text="cocher Actif sur le plugin multivue",
+            ),
             TutorialStep(
-                "Plugin multivue", "Deplier la carte multivue",
+                "Plugin multivue",
+                "Deplier la carte multivue",
                 "Deplie la carte pour afficher l'entree pairs_csv et les actions.",
                 lambda: self._plugin_control("demo_2_multivue_kpts", "plugin_expand"),
                 prepare=lambda: self._show_plugin_card("demo_2_multivue_kpts"),
                 ready=lambda: self._plugin_expanded("demo_2_multivue_kpts"),
-                ready_text="deplier la carte multivue"),
+                ready_text="deplier la carte multivue",
+            ),
             TutorialStep(
-                "Plugin multivue", "Deposer le CSV des correspondances",
+                "Plugin multivue",
+                "Deposer le CSV des correspondances",
                 "Glisse CSV correspondances multivues dans pairs_csv. Les appariements pre-calcules couvrent les dix couples RGB/IR.",
                 lambda: self._plugin_input_zone("demo_2_multivue_kpts", "pairs_csv"),
                 prepare=lambda: self._show_explorer(
-                    plugin_data=("demo_2_multivue_kpts", "pairs_csv")),
+                    plugin_data=("demo_2_multivue_kpts", "pairs_csv")
+                ),
                 ready=lambda: self._plugin_has_input("demo_2_multivue_kpts", "pairs_csv"),
-                ready_text="deposer le CSV dans pairs_csv"),
+                ready_text="deposer le CSV dans pairs_csv",
+            ),
             TutorialStep(
-                "Plugin multivue", "Ouvrir les reglages multivues",
+                "Plugin multivue",
+                "Ouvrir les reglages multivues",
                 "Clique Ouvrir le panneau (dock). Il distingue les 600 lignes fixes du CSV du nombre de correspondances visibles sur la frame courante.",
                 lambda: self._plugin_control("demo_2_multivue_kpts", "plugin_open_dock"),
                 prepare=lambda: self._show_plugin_card("demo_2_multivue_kpts"),
                 ready=lambda: self._plugin_dock_visible("demo_2_multivue_kpts"),
-                ready_text="ouvrir le panneau du plugin multivue"),
+                ready_text="ouvrir le panneau du plugin multivue",
+            ),
             TutorialStep(
-                "Plugin multivue", "Naviguer avec les correspondances",
+                "Plugin multivue",
+                "Naviguer avec les correspondances",
                 "Clique dans une vue puis deplace sa mini-timeline. Le compteur affiche sur la vue haute et dans le dock s'adapte a chaque paire de frames.",
-                central, prepare=self._prepare_link_navigation_test,
+                central,
+                prepare=self._prepare_link_navigation_test,
                 ready=self._linked_navigation_done,
                 ready_text="cliquer une vue puis changer de frame",
                 progress=lambda: [
                     ("Cliquer dans une vue", self._linked_canvas_clicked),
-                    ("Changer de frame", self._visible_view_frames() != self._link_navigation_initial),
-                ]),
+                    (
+                        "Changer de frame",
+                        self._visible_view_frames() != self._link_navigation_initial,
+                    ),
+                ],
+            ),
             TutorialStep(
-                "Plugin multivue", "Confiance, taille et couleur",
+                "Plugin multivue",
+                "Confiance, taille et couleur",
                 "La taille de base vaut 11 px. Taille proportionnelle et Coolwarm_r utilisent la meme normalisation : adaptative a la frame, ou absolue sur tout le CSV. Un score faible est rouge, un score fort bleu.",
-                lambda: self._plugin_dock("demo_2_multivue_kpts")),
+                lambda: self._plugin_dock("demo_2_multivue_kpts"),
+            ),
             TutorialStep(
-                "Fin", "Flux complet maitrise",
+                "Fin",
+                "Flux complet maitrise",
                 "Tu as charge deux vues, enregistre des clics, annote, decoupe, lie des offsets et alimente deux plugins par drag-and-drop. Convertir exporte la composition; l'Aide reste la reference detaillee.",
-                lambda: w.aide_btn),
+                lambda: w.aide_btn,
+            ),
         ]
 
     def eventFilter(self, watched, event):
@@ -886,11 +1013,18 @@ class FrameViewerTutorial(QtCore.QObject):
             key = event.key()
             editing = isinstance(
                 watched,
-                (QtWidgets.QAbstractSpinBox, QtWidgets.QLineEdit,
-                 QtWidgets.QSlider, QtWidgets.QAbstractItemView),
+                (
+                    QtWidgets.QAbstractSpinBox,
+                    QtWidgets.QLineEdit,
+                    QtWidgets.QSlider,
+                    QtWidgets.QAbstractItemView,
+                ),
             )
-            if (not editing and QtWidgets.QApplication.activeModalWidget() is None
-                    and key in (Qt.Key_Left, Qt.Key_Right)):
+            if (
+                not editing
+                and QtWidgets.QApplication.activeModalWidget() is None
+                and key in (Qt.Key_Left, Qt.Key_Right)
+            ):
                 if key == Qt.Key_Left:
                     self.previous()
                 elif self._is_ready():
@@ -900,8 +1034,11 @@ class FrameViewerTutorial(QtCore.QObject):
             videos = self.window._all_view_videos()
         except RuntimeError:
             videos = []
-        if (watched in videos and event.type() == QtCore.QEvent.MouseButtonPress
-                and event.button() in (Qt.LeftButton, Qt.MiddleButton)):
+        if (
+            watched in videos
+            and event.type() == QtCore.QEvent.MouseButtonPress
+            and event.button() in (Qt.LeftButton, Qt.MiddleButton)
+        ):
             self._linked_canvas_clicked = True
         video = self.window.view
         if watched is video:
@@ -909,7 +1046,10 @@ class FrameViewerTutorial(QtCore.QObject):
                 self._canvas_actions["wheel"] = True
             elif event.type() == QtCore.QEvent.MouseMove and event.buttons() & Qt.MiddleButton:
                 self._canvas_actions["pan"] = True
-            elif event.type() == QtCore.QEvent.MouseButtonRelease and event.button() == Qt.MiddleButton:
+            elif (
+                event.type() == QtCore.QEvent.MouseButtonRelease
+                and event.button() == Qt.MiddleButton
+            ):
                 if not getattr(video, "_pan_moved", False):
                     self._canvas_actions["fit"] = True
         return False

@@ -4,6 +4,7 @@
 Frames enter and leave this module as NumPy arrays. See
 ``docs/rendering-pipeline.md`` for the complete contract.
 """
+
 import cv2
 import numpy as np
 
@@ -14,16 +15,23 @@ def signed_diff_colormap(gray8):
     """Diverging red -> black -> blue map, with zero mapped to black."""
     anchors_x = np.array([0, 102, 127, 128, 153, 255], dtype=np.float32)
     # BGR anchors approximate matplotlib coolwarm_r, with a hard black center.
-    anchors_bgr = np.array([
-        [38, 4, 180], [173, 196, 238], [0, 0, 0], [0, 0, 0],
-        [234, 202, 179], [192, 76, 59],
-    ], dtype=np.float32)
+    anchors_bgr = np.array(
+        [
+            [38, 4, 180],
+            [173, 196, 238],
+            [0, 0, 0],
+            [0, 0, 0],
+            [234, 202, 179],
+            [192, 76, 59],
+        ],
+        dtype=np.float32,
+    )
     values = np.arange(256, dtype=np.float32)
     lut = np.empty((256, 3), dtype=np.uint8)
     for channel in range(3):
-        lut[:, channel] = np.clip(
-            np.interp(values, anchors_x, anchors_bgr[:, channel]), 0, 255)
+        lut[:, channel] = np.clip(np.interp(values, anchors_x, anchors_bgr[:, channel]), 0, 255)
     return lut[np.asarray(gray8, dtype=np.uint8)]
+
 
 def load_cube(path):
     """Parse a 3D ``.cube`` LUT and return ``(lut, size)``.
@@ -54,7 +62,7 @@ def load_cube(path):
     if size is None:
         raise ValueError("LUT_3D_SIZE introuvable dans le fichier .cube.")
     arr = np.asarray(data, dtype=np.float32)
-    if arr.shape[0] != size ** 3:
+    if arr.shape[0] != size**3:
         raise ValueError(f"Donnees .cube incoherentes ({arr.shape[0]} != {size**3}).")
     lut = arr.reshape(size, size, size, 3)  # [b, g, r, rgb]
     return lut, size
@@ -89,11 +97,36 @@ def apply_cube(frame_bgr, lut, size):
 
 # Rendering pipeline shared by the GUI and conversion workers.
 
+
+def _finite_values(arr, dtype):
+    """Flatten ``arr`` and drop NaN/inf, which would poison min/max/percentiles."""
+    g = np.asarray(arr, dtype=dtype).ravel()
+    if np.issubdtype(np.asarray(arr).dtype, np.floating):
+        g = g[np.isfinite(g)]
+    return g
+
+
+def finite_range(arr):
+    """Return ``(min, max)`` over finite values, ``(0.0, 1.0)`` if there are none."""
+    g = _finite_values(arr, np.float64)
+    if g.size == 0:
+        return 0.0, 1.0
+    return float(g.min()), float(g.max())
+
+
 def window8(arr, lo, hi):
-    """Map ``[lo, hi]`` linearly to ``[0, 255]``."""
-    if hi <= lo:
+    """Map ``[lo, hi]`` linearly to ``[0, 255]``.
+
+    NaN pixels render black, +inf white and -inf black (float IR data).
+    """
+    lo, hi = float(lo), float(hi)
+    if not np.isfinite(lo):
+        lo = 0.0
+    if not np.isfinite(hi) or hi <= lo:
         hi = lo + 1.0
-    out = (arr.astype(np.float32) - float(lo)) * (255.0 / (float(hi) - float(lo)))
+    out = (arr.astype(np.float32) - lo) * (255.0 / (hi - lo))
+    if np.issubdtype(arr.dtype, np.floating):
+        out = np.nan_to_num(out, nan=0.0, posinf=255.0, neginf=0.0)
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
@@ -103,7 +136,7 @@ def to_intensity(raw):
         return raw
     if raw.shape[2] == 1:
         return raw[:, :, 0]
-    if raw.shape[2] == 4:       # Drop alpha before conversion.
+    if raw.shape[2] == 4:  # Drop alpha before conversion.
         raw = raw[:, :, :3]
     if raw.dtype == np.uint8:
         return cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
@@ -112,7 +145,7 @@ def to_intensity(raw):
 
 def auto_window(inten, pg=0.35, pd=0.35):
     """Compute an automatic window with low/high percentile saturation."""
-    g = np.asarray(inten, dtype=np.float32).ravel()
+    g = _finite_values(inten, np.float32)
     if g.size == 0:
         return 0.0, 1.0
     pg = max(0.0, min(49.0, float(pg)))
@@ -128,7 +161,7 @@ def auto_window(inten, pg=0.35, pd=0.35):
 
 def auto_window_sigma(inten, n_sigma=3.0):
     """Compute a mean +/- N-sigma window clipped to the observed range."""
-    g = np.asarray(inten, dtype=np.float64).ravel()
+    g = _finite_values(inten, np.float64)
     if g.size == 0:
         return 0.0, 1.0
     mu = float(g.mean())
@@ -138,6 +171,30 @@ def auto_window_sigma(inten, n_sigma=3.0):
     if hi <= lo:
         hi = lo + 1.0
     return lo, hi
+
+
+def sigma_window_u8(raw, n_sigma=3.0):
+    """Intensity of ``raw`` windowed to mean +/- ``n_sigma`` sigma, as uint8.
+
+    Same window as the "Auto" histogram mode, computed on this frame only.
+    """
+    inten = to_intensity(raw)
+    lo, hi = auto_window_sigma(inten, n_sigma)
+    return window8(inten, lo, hi)
+
+
+def native_intensity(raw):
+    """Single-channel intensity that keeps the native sample type.
+
+    ``to_intensity`` averages multi-channel integer data in float32; this
+    rounds it back to the source integer type so a 16-bit color frame stays
+    16-bit instead of being squeezed to 8 bits. Floats are kept as is.
+    """
+    inten = to_intensity(raw)
+    if np.issubdtype(raw.dtype, np.integer) and not np.issubdtype(inten.dtype, np.integer):
+        info = np.iinfo(raw.dtype)
+        inten = np.clip(np.rint(inten), info.min, info.max).astype(raw.dtype)
+    return inten
 
 
 def apply_filters(bgr, flags):
@@ -177,8 +234,9 @@ def apply_filters(bgr, flags):
     return np.ascontiguousarray(img)
 
 
-def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
-                 full_range=(0, 255), filters=None):
+def render_frame(
+    raw, lo, hi, lut_data, cube_lut=None, cube_size=0, full_range=(0, 255), filters=None
+):
     """Render a native frame as uint8 BGR ready for display or export."""
     if lut_data == SIGNED_DIFF_LUT:
         amplitude = max(abs(float(lo)), abs(float(hi)), 1e-6)
@@ -186,15 +244,13 @@ def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
     # Normalize BGRA to BGR by dropping alpha.
     if raw.ndim == 3 and raw.shape[2] == 4:
         raw = raw[:, :, :3]
-    is_color_u8 = (raw.ndim == 3 and raw.shape[2] == 3 and raw.dtype == np.uint8)
-    is_color_other = (raw.ndim == 3 and raw.shape[2] == 3 and not is_color_u8)
+    is_color_u8 = raw.ndim == 3 and raw.shape[2] == 3 and raw.dtype == np.uint8
+    is_color_other = raw.ndim == 3 and raw.shape[2] == 3 and not is_color_u8
     fr0, fr1 = full_range
     engaged = not (lo <= fr0 + 1e-6 and hi >= fr1 - 1e-6)
     if lut_data is None and (is_color_u8 or is_color_other):
         # Preserve color for 3-channel arrays and window each channel.
-        base = (window8(raw, lo, hi)
-                if (engaged or is_color_other)
-                else np.ascontiguousarray(raw))
+        base = window8(raw, lo, hi) if (engaged or is_color_other) else np.ascontiguousarray(raw)
     else:
         inten = to_intensity(raw)
         g8 = window8(inten, lo, hi)
@@ -217,11 +273,14 @@ def render_frame(raw, lo, hi, lut_data, cube_lut=None, cube_size=0,
 # -------------------------------- blending ---------------------------------
 
 BLEND_MODES = [
-    ("alpha",  "Alpha (fondu)"),
+    ("alpha", "Alpha (fondu)"),
     ("add_ab", "Addition pondérée (A + %·B)"),
     ("add_ba", "Addition pondérée (B + %·A)"),
-    ("diff",   "Différence |A−B|"),
+    ("diff", "Différence |A−B|"),
     ("damier", "Damier"),
+    ("wipe", "Rideau A/B (poignée à glisser)"),
+    ("max", "Maximum (A, B)"),
+    ("mult", "Multiplication A·B"),
 ]
 
 
@@ -249,7 +308,7 @@ def blend_frames(a, b, alpha=0.5, mode="alpha"):
         h, w = a.shape[:2]
         tile = max(8, min(h, w) // 12)
         yy, xx = np.indices((h, w))
-        mask = (((xx // tile) + (yy // tile)) % 2 == 0)
+        mask = ((xx // tile) + (yy // tile)) % 2 == 0
         out = b.copy()
         out[mask] = a[mask]
         return out
@@ -267,4 +326,3 @@ def blend_frames(a, b, alpha=0.5, mode="alpha"):
         # B + alpha*A, clamped to 0..255.
         return cv2.addWeighted(b, 1.0, a, alpha, 0.0)
     return cv2.addWeighted(a, 1.0 - alpha, b, alpha, 0.0)  # Default alpha blend.
-

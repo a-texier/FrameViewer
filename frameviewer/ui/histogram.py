@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 """Histogramme facon FIJI/ImageJ : trace + poignees lo/hi, modes Auto /
 Min-Max / Pleine plage / Custom."""
+
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from frameviewer.core.pipeline import auto_window
+from frameviewer.ui.theming import ui_color
+
 
 class HistCanvas(QtWidgets.QWidget):
     """Trace l'histogramme + 2 poignees (lo/hi) deplacables a la souris."""
+
     rangeChanged = QtCore.Signal(float, float)
 
     def __init__(self, parent=None):
@@ -26,13 +30,13 @@ class HistCanvas(QtWidgets.QWidget):
         return self._ml()
 
     def _ml(self):
-        return 34   # marge gauche : place pour les labels de l'axe Y (comptes)
+        return 34  # marge gauche : place pour les labels de l'axe Y (comptes)
 
     def _mr(self):
         return 8
 
     def _mb(self):
-        return 28   # marge basse : ticks domaine (min/max) + fenêtre (lo/hi)
+        return 28  # marge basse : ticks domaine (min/max) + fenêtre (lo/hi)
 
     def _xval(self, v):
         ml, mr = self._ml(), self._mr()
@@ -60,7 +64,7 @@ class HistCanvas(QtWidgets.QWidget):
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor(28, 28, 32))
+        p.fillRect(self.rect(), ui_color(28, 28, 32))
         ml, mr = self._ml(), self._mr()
         w = self.width() - ml - mr
         base = self.height() - self._mb()
@@ -72,24 +76,26 @@ class HistCanvas(QtWidgets.QWidget):
             mx = float(c.max()) if c.max() > 0 else 1.0
             nb = len(c)
             p.setPen(Qt.NoPen)
-            p.setBrush(QtGui.QColor(120, 120, 140))
+            p.setBrush(ui_color(120, 120, 140))
             for i in range(nb):
                 bh = (c[i] / mx) * (base - 4)
                 x0 = ml + i / nb * w
                 x1 = ml + (i + 1) / nb * w
                 p.drawRect(QtCore.QRectF(x0, base - bh, max(1.0, x1 - x0), bh))
         # ── axe Y (comptes) : ligne + 3 graduations (0 / mi / max) ──
-        p.setPen(QtGui.QPen(QtGui.QColor(90, 90, 100), 1))
+        p.setPen(QtGui.QPen(ui_color(90, 90, 100), 1))
         p.drawLine(QtCore.QLineF(ml, 0, ml, base))
-        p.setPen(QtGui.QColor(150, 150, 160))
-        font = p.font(); font.setPixelSize(9); p.setFont(font)
+        p.setPen(ui_color(150, 150, 160))
+        font = p.font()
+        font.setPixelSize(9)
+        p.setFont(font)
         for frac in (0.0, 0.5, 1.0):
             y = base - frac * (base - 4)
-            p.setPen(QtGui.QPen(QtGui.QColor(60, 60, 68), 1, Qt.DotLine))
+            p.setPen(QtGui.QPen(ui_color(60, 60, 68), 1, Qt.DotLine))
             p.drawLine(QtCore.QLineF(ml, y, ml + w, y))
             val = frac * mx
             txt = f"{val:.0f}" if not self.log else f"{np.expm1(val):.0f}"
-            p.setPen(QtGui.QColor(150, 150, 160))
+            p.setPen(ui_color(150, 150, 160))
             p.drawText(QtCore.QRectF(0, y - 6, ml - 3, 12), Qt.AlignRight | Qt.AlignVCenter, txt)
         # zones hors fenetre assombries
         xlo = self._xval(self.lo)
@@ -109,12 +115,12 @@ class HistCanvas(QtWidgets.QWidget):
             p.setBrush(col)
             p.drawRect(QtCore.QRectF(x - 3, base - 6, 6, 6))
         # ── axe X : bornes du domaine (min/max) puis fenêtre courante (lo/hi) ──
-        p.setPen(QtGui.QPen(QtGui.QColor(90, 90, 100), 1))
+        p.setPen(QtGui.QPen(ui_color(90, 90, 100), 1))
         p.drawLine(QtCore.QLineF(ml, base, ml + w, base))
-        p.setPen(QtGui.QColor(120, 120, 130))
+        p.setPen(ui_color(120, 120, 130))
         p.drawText(QtCore.QRectF(ml, base + 1, w, 12), Qt.AlignLeft, f"{self.dmin:.0f}")
         p.drawText(QtCore.QRectF(ml, base + 1, w, 12), Qt.AlignRight, f"{self.dmax:.0f}")
-        p.setPen(QtGui.QColor(200, 200, 210))
+        p.setPen(ui_color(200, 200, 210))
         p.drawText(QtCore.QRectF(ml, base + 13, w, 14), Qt.AlignLeft, f"lo {self.lo:.0f}")
         p.drawText(QtCore.QRectF(ml, base + 13, w, 14), Qt.AlignRight, f"hi {self.hi:.0f}")
 
@@ -142,6 +148,7 @@ class HistCanvas(QtWidgets.QWidget):
 
 class HistogramLUT(QtWidgets.QWidget):
     """Panneau type FIJI Brightness/Contrast: histogramme + reglages de fenetre."""
+
     windowChanged = QtCore.Signal()
     perFrameChanged = QtCore.Signal()  # mode par-frame change (boutons radio)
 
@@ -160,7 +167,7 @@ class HistogramLUT(QtWidgets.QWidget):
             s.setRange(0.0, 255.0)
             s.setDecimals(0)
             s.setKeyboardTracking(False)
-            # flèches natives ▲▼ retirées : remplacées par des boutons -/+
+            # flèches natives haut/bas retirées : remplacées par des boutons -/+
             # explicites (moins ambigus) juste à côté du champ.
             s.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.lo_spin.valueChanged.connect(self._from_spin)
@@ -177,13 +184,14 @@ class HistogramLUT(QtWidgets.QWidget):
                 "QToolButton{background:#26262e;color:#ddd;border:1px solid #444;"
                 "border-radius:3px;font-size:13px;font-weight:bold;}"
                 "QToolButton:hover{border-color:#5aafff;color:#fff;}"
-                "QToolButton:pressed{background:#333340;}")
+                "QToolButton:pressed{background:#333340;}"
+            )
             return b
 
         self.lo_minus = _step_btn("−", "Diminuer le point noir")
-        self.lo_plus  = _step_btn("+", "Augmenter le point noir")
+        self.lo_plus = _step_btn("+", "Augmenter le point noir")
         self.hi_minus = _step_btn("−", "Diminuer le point blanc")
-        self.hi_plus  = _step_btn("+", "Augmenter le point blanc")
+        self.hi_plus = _step_btn("+", "Augmenter le point blanc")
         self.lo_minus.clicked.connect(self.lo_spin.stepDown)
         self.lo_plus.clicked.connect(self.lo_spin.stepUp)
         self.hi_minus.clicked.connect(self.hi_spin.stepDown)
@@ -258,9 +266,12 @@ class HistogramLUT(QtWidgets.QWidget):
         return (0.35, 0.35)
 
     def per_frame_mode(self):
-        if self.auto_btn.isChecked():      return "Auto"
-        if self.minmax_btn.isChecked():    return "Min/Max"
-        if self.fullrange_btn.isChecked(): return "Pleine plage"
+        if self.auto_btn.isChecked():
+            return "Auto"
+        if self.minmax_btn.isChecked():
+            return "Min/Max"
+        if self.fullrange_btn.isChecked():
+            return "Pleine plage"
         return "Custom"
 
     def set_mode_silent(self, mode):
@@ -268,8 +279,12 @@ class HistogramLUT(QtWidgets.QWidget):
         recalcul de fenêtre ni émission de signal : sert à restaurer le mode
         propre à une vue lors d'un changement de vue actives, sans écraser la
         fenêtre (lo/hi) déjà restaurée juste avant par l'appelant."""
-        mapping = {"Auto": self.auto_btn, "Min/Max": self.minmax_btn,
-                   "Pleine plage": self.fullrange_btn, "Custom": self.custom_btn}
+        mapping = {
+            "Auto": self.auto_btn,
+            "Min/Max": self.minmax_btn,
+            "Pleine plage": self.fullrange_btn,
+            "Custom": self.custom_btn,
+        }
         target = mapping.get(mode)
         for b in (self.auto_btn, self.minmax_btn, self.fullrange_btn, self.custom_btn):
             b.blockSignals(True)
@@ -371,4 +386,3 @@ class HistogramLUT(QtWidgets.QWidget):
 
 
 # ------------- conversion (tout type -> tout autre type, en thread) -------------
-

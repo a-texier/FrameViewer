@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """Prefetch upcoming frames to reduce latency for remote media sources."""
+
 import cv2
 from PySide6 import QtCore
 
+
 class _PrefetchThread(QtCore.QThread):
     """Load selected frames into a cache from a background thread."""
+
     # PySide6 6.8 may silently turn Signal(dict) into an empty mapping across
     # threads. Signal(object) preserves NumPy arrays and their indices.
     done = QtCore.Signal(object)

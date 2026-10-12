@@ -18,6 +18,7 @@ bloque pas l'app, on peut naviguer dans la sequence et cliquer "Tester
 `graph.json` + regenere un `plugin.py` wrapper (GraphPlugin) -- un plugin
 "graphe" reste un plugin normal pour le loader (voir docs/plugins.md).
 """
+
 import json
 import os
 
@@ -27,13 +28,14 @@ from frameviewer.plugins.graph import REGISTRY, Graph, evaluate_graph_for_frame
 from frameviewer.plugins.graph_runtime import GRAPH_FILE
 from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX, PLUGIN_MODULE_FILE
 from frameviewer.ui.i18n import set_ui_text, ui_text
+from frameviewer.ui.theming import themed_html
 
 NODE_W = 200
 ROW_H = 22
 HEADER_H = 26
 PORT_R = 5
 
-_WRAPPER_TEMPLATE = '''# -*- coding: utf-8 -*-
+_WRAPPER_TEMPLATE = """# -*- coding: utf-8 -*-
 # Genere par l'editeur de graphe (Parametres > Plugins > Editeur de graphe)
 # -- NE PAS EDITER A LA MAIN, ce fichier est ECRASE a chaque sauvegarde
 # depuis l'editeur. Toute la logique vit dans graph.json (memes voisins).
@@ -46,7 +48,7 @@ class {cls}(_Base):
 
 
 PLUGIN = {cls}
-'''
+"""
 
 
 _HELP_HTML = """
@@ -146,13 +148,15 @@ class NodeItem(QtWidgets.QGraphicsRectItem):
         super().__init__(0, 0, NODE_W, h)
         self.node_id = node_id
         self.node_type = node_type
-        self.setFlags(QtWidgets.QGraphicsItem.ItemIsMovable
-                      | QtWidgets.QGraphicsItem.ItemIsSelectable
-                      | QtWidgets.QGraphicsItem.ItemSendsGeometryChanges)
+        self.setFlags(
+            QtWidgets.QGraphicsItem.ItemIsMovable
+            | QtWidgets.QGraphicsItem.ItemIsSelectable
+            | QtWidgets.QGraphicsItem.ItemSendsGeometryChanges
+        )
         self.setBrush(QtGui.QColor(45, 45, 54))
         self.setPen(QtGui.QPen(QtGui.QColor(95, 95, 110), 1))
         self.setZValue(1)
-        self.on_moved = None   # callback(node_item), branche par l'editeur
+        self.on_moved = None  # callback(node_item), branche par l'editeur
 
         # bandeau de titre colore par categorie -- reperage visuel rapide.
         cat_col = _CATEGORY_COLORS.get(node_type.category, QtGui.QColor(70, 70, 82))
@@ -163,7 +167,9 @@ class NodeItem(QtWidgets.QGraphicsRectItem):
 
         title = QtWidgets.QGraphicsSimpleTextItem(node_type.label, self)
         title.setBrush(QtGui.QColor(245, 245, 245))
-        f = title.font(); f.setBold(True); title.setFont(f)
+        f = title.font()
+        f.setBold(True)
+        title.setFont(f)
         title.setPos(8, 5)
 
         self.input_ports = {}
@@ -309,10 +315,11 @@ class GraphScene(QtWidgets.QGraphicsScene):
         if prev is port:
             return
         if prev.is_output == port.is_output:
-            return   # 2 sorties ou 2 entrees : rien a relier
+            return  # 2 sorties ou 2 entrees : rien a relier
         src, dst = (prev, port) if prev.is_output else (port, prev)
-        self.editor.add_edge(src.node_item.node_id, src.port_name,
-                             dst.node_item.node_id, dst.port_name)
+        self.editor.add_edge(
+            src.node_item.node_id, src.port_name, dst.node_item.node_id, dst.port_name
+        )
 
 
 # Synonymes de recherche par bloc (FR + EN + symboles) -- alimente la palette
@@ -496,6 +503,7 @@ class GraphView(QtWidgets.QGraphicsView):
 class NodeGraphEditorWidget(QtWidgets.QWidget):
     def _tr(self, text):
         return ui_text(self, text)
+
     """Coeur de l'editeur -- reutilisable (fenetre autonome, dock...). Ne
     connait de MainWindow que ce dont il a besoin : self._mw.cur / .source /
     ._raw / ._display() / ._plugin_loader."""
@@ -507,8 +515,8 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         self._on_saved = on_saved
 
         self.graph = self._load_or_new_graph()
-        self.node_items = {}   # node_id -> NodeItem
-        self.edge_items = []   # [EdgeItem]
+        self.node_items = {}  # node_id -> NodeItem
+        self.edge_items = []  # [EdgeItem]
 
         vbox = QtWidgets.QVBoxLayout(self)
         vbox.setContentsMargins(6, 6, 6, 6)
@@ -527,12 +535,15 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         self._frame_col_combo.setMinimumWidth(120)
         self._frame_col_combo.setToolTip(
             "Colonne du CSV qui identifie la frame (regroupe les lignes par "
-            "frame avant d'evaluer le graphe). Laisse vide = 1re colonne.")
+            "frame avant d'evaluer le graphe). Laisse vide = 1re colonne."
+        )
         top.addWidget(self._frame_col_combo)
 
         help_btn = QtWidgets.QPushButton("Aide")
-        help_btn.setToolTip("Comment ça marche : le principe, un exemple "
-                           "fonctionnel à insérer, les conditions requises.")
+        help_btn.setToolTip(
+            "Comment ça marche : le principe, un exemple "
+            "fonctionnel à insérer, les conditions requises."
+        )
         help_btn.clicked.connect(self._show_help)
         top.addWidget(help_btn)
 
@@ -546,7 +557,8 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         save_reload_btn = QtWidgets.QPushButton("Enregistrer + recharger")
         save_reload_btn.setToolTip(
             "Enregistre le graphe puis recharge les plugins et redessine la "
-            "vue -- le resultat s'affiche tout de suite si le plugin est actif.")
+            "vue -- le resultat s'affiche tout de suite si le plugin est actif."
+        )
         save_reload_btn.clicked.connect(self._save_and_reload)
         top.addWidget(save_reload_btn)
         vbox.addLayout(top)
@@ -560,7 +572,8 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
             "Clic droit (ou double-clic) sur le fond = palette de blocs "
             "(tape pour chercher, Entrée pour ajouter). Clique une sortie "
             "(bleue) puis une entrée (orange) pour relier. Molette = zoom, "
-            "bouton du milieu = déplacer la vue. Suppr = retirer.")
+            "bouton du milieu = déplacer la vue. Suppr = retirer."
+        )
         self._status.setStyleSheet("color:#888; font-size:11px;")
         self._status.setWordWrap(True)
         vbox.addWidget(self._status)
@@ -626,16 +639,19 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(dlg)
         browser = QtWidgets.QTextBrowser()
         browser.setOpenExternalLinks(False)
-        browser.setHtml(_HELP_HTML)
+        browser.setHtml(themed_html(_HELP_HTML))
         lay.addWidget(browser, 1)
         row = QtWidgets.QHBoxLayout()
         ex_btn = QtWidgets.QPushButton("Insérer l'exemple fonctionnel (keypoints)")
-        ex_btn.setToolTip("Ajoute au canvas un petit graphe complet qui "
-                         "dessine un segment par paire de points d'un CSV.")
+        ex_btn.setToolTip(
+            "Ajoute au canvas un petit graphe complet qui "
+            "dessine un segment par paire de points d'un CSV."
+        )
 
         def _do_example():
             self.insert_example_keypoints()
             dlg.accept()
+
         ex_btn.clicked.connect(_do_example)
         row.addWidget(ex_btn)
         row.addStretch(1)
@@ -652,10 +668,18 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         recouvrir un graphe deja present."""
         dx = 60 * (len(self.node_items) > 0)
         base_x = 40 + dx
-        x1 = self.add_node("csv_column", params={"colonne": "x1", "type": "nombre"}, pos=[base_x, 40])
-        y1 = self.add_node("csv_column", params={"colonne": "y1", "type": "nombre"}, pos=[base_x, 190])
-        x2 = self.add_node("csv_column", params={"colonne": "x2", "type": "nombre"}, pos=[base_x, 340])
-        y2 = self.add_node("csv_column", params={"colonne": "y2", "type": "nombre"}, pos=[base_x, 490])
+        x1 = self.add_node(
+            "csv_column", params={"colonne": "x1", "type": "nombre"}, pos=[base_x, 40]
+        )
+        y1 = self.add_node(
+            "csv_column", params={"colonne": "y1", "type": "nombre"}, pos=[base_x, 190]
+        )
+        x2 = self.add_node(
+            "csv_column", params={"colonne": "x2", "type": "nombre"}, pos=[base_x, 340]
+        )
+        y2 = self.add_node(
+            "csv_column", params={"colonne": "y2", "type": "nombre"}, pos=[base_x, 490]
+        )
         col = self.add_node("color_const", params={"rgb": "0,255,0"}, pos=[base_x + 260, 520])
         seg = self.add_node("line_shape", pos=[base_x + 300, 150])
         out = self.add_node("output_overlays", pos=[base_x + 600, 190])
@@ -667,9 +691,11 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         self.add_edge(seg.node_id, "forme", out.node_id, "forme")
         if not self._frame_col_combo.currentText().strip():
             self._frame_col_combo.setEditText("frame")
-        set_ui_text(self._status,
+        set_ui_text(
+            self._status,
             "Exemple keypoints inséré. Vérifie la « Colonne frame », puis "
-            "« Tester (frame courante) » ou « Enregistrer + recharger ».")
+            "« Tester (frame courante) » ou « Enregistrer + recharger ».",
+        )
 
     # ---------- fichiers ----------
     def _load_or_new_graph(self):
@@ -687,7 +713,9 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         with open(os.path.join(self.folder, GRAPH_FILE), "w", encoding="utf-8") as f:
             json.dump(self.graph.to_dict(), f, indent=1)
         entry = os.path.basename(self.folder)
-        slug = entry[len(PLUGIN_FOLDER_PREFIX):] if entry.startswith(PLUGIN_FOLDER_PREFIX) else entry
+        slug = (
+            entry[len(PLUGIN_FOLDER_PREFIX) :] if entry.startswith(PLUGIN_FOLDER_PREFIX) else entry
+        )
         cls = "".join(p.capitalize() for p in slug.split("_")) + "GraphPlugin"
         with open(os.path.join(self.folder, PLUGIN_MODULE_FILE), "w", encoding="utf-8") as f:
             f.write(_WRAPPER_TEMPLATE.format(cls=cls, name=slug))
@@ -704,7 +732,8 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
 
     def _browse_csv(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, ui_text(self, "Choisir un CSV pour ce graphe"), "", "CSV (*.csv)")
+            self, ui_text(self, "Choisir un CSV pour ce graphe"), "", "CSV (*.csv)"
+        )
         if not path:
             return
         self.graph.csv_path = path
@@ -735,6 +764,7 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         if not path:
             return
         import csv as _csv
+
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
             header = next(_csv.reader(f), [])
         self._frame_col_combo.clear()
@@ -745,9 +775,11 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
             if item.node_type.key == "csv_column":
                 item.set_column_options(header)
         origin = "" if self.graph.csv_path else " (aperçu du dossier)"
-        set_ui_text(self._status,
+        set_ui_text(
+            self._status,
             f"Colonnes CSV : {os.path.basename(path)}{origin} "
-            f"-- {len(header)} colonne(s) proposée(s).")
+            f"-- {len(header)} colonne(s) proposée(s).",
+        )
 
     def _test_current_frame(self):
         self._save()
@@ -756,20 +788,26 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         csv_path = self._effective_csv_path()
         if csv_path:
             import csv as _csv
+
             with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
                 rows = list(_csv.DictReader(f))
             frame_col = self.graph.frame_column or (next(iter(rows[0])) if rows else None)
-            frame_rows = [r for r in rows if str(r.get(frame_col, "")).strip()
-                         and int(float(r[frame_col])) == idx]
+            frame_rows = [
+                r
+                for r in rows
+                if str(r.get(frame_col, "")).strip() and int(float(r[frame_col])) == idx
+            ]
         try:
             shapes = evaluate_graph_for_frame(self.graph, frame_rows, idx)
         except Exception as ex:
             QtWidgets.QMessageBox.warning(self, "Test du graphe", f"Erreur : {ex}")
             return
         QtWidgets.QMessageBox.information(
-            self, "Test du graphe",
+            self,
+            "Test du graphe",
             f"Frame {idx} -- {len(frame_rows)} ligne(s) CSV -> {len(shapes)} forme(s) :\n\n"
-            + json.dumps(shapes, indent=1, ensure_ascii=False)[:3000])
+            + json.dumps(shapes, indent=1, ensure_ascii=False)[:3000],
+        )
 
     # ---------- construction du canvas ----------
     def add_node(self, type_key, node_id=None, params=None, pos=None):
@@ -803,8 +841,7 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
         edge = EdgeItem(src_item.output_ports[src_port], dst_item.input_ports[dst_port])
         self.scene.addItem(edge)
         self.edge_items.append(edge)
-        set_ui_text(
-            self._status, f"Relié : {src_id}.{src_port} -> {dst_id}.{dst_port}")
+        set_ui_text(self._status, f"Relié : {src_id}.{src_port} -> {dst_id}.{dst_port}")
 
     def _on_node_moved(self, node_item):
         for e in self.edge_items:
@@ -814,14 +851,21 @@ class NodeGraphEditorWidget(QtWidgets.QWidget):
     def _remove_edge(self, edge):
         self.scene.removeItem(edge)
         self.edge_items.remove(edge)
-        tup = (edge.src_port.node_item.node_id, edge.src_port.port_name,
-              edge.dst_port.node_item.node_id, edge.dst_port.port_name)
+        tup = (
+            edge.src_port.node_item.node_id,
+            edge.src_port.port_name,
+            edge.dst_port.node_item.node_id,
+            edge.dst_port.port_name,
+        )
         if tup in self.graph.edges:
             self.graph.edges.remove(tup)
 
     def _remove_node(self, node_item):
-        for e in [e for e in self.edge_items
-                 if e.src_port.node_item is node_item or e.dst_port.node_item is node_item]:
+        for e in [
+            e
+            for e in self.edge_items
+            if e.src_port.node_item is node_item or e.dst_port.node_item is node_item
+        ]:
             self._remove_edge(e)
         self.scene.removeItem(node_item)
         self.node_items.pop(node_item.node_id, None)
@@ -891,7 +935,7 @@ def open_node_graph_editor(mw, plugin_folder, on_saved=None):
             existing.activateWindow()
             return existing
         except RuntimeError:
-            windows.pop(key, None)   # fenetre Qt deja detruite
+            windows.pop(key, None)  # fenetre Qt deja detruite
     win = NodeGraphEditorWindow(mw, plugin_folder, on_saved=on_saved)
     win.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
     win.destroyed.connect(lambda *_: windows.pop(key, None))

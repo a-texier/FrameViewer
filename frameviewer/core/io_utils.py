@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Unicode-safe image I/O, natural sorting, and duration formatting."""
+
 import os
 import re
 
@@ -21,8 +22,10 @@ def dirent_image_path(entry):
         return entry.path
     if ext == "":
         try:
-            if entry.is_symlink() and \
-                    os.path.splitext(os.path.realpath(entry.path))[1].lower() in IMAGE_EXTS:
+            if (
+                entry.is_symlink()
+                and os.path.splitext(os.path.realpath(entry.path))[1].lower() in IMAGE_EXTS
+            ):
                 return entry.path
         except OSError:
             return None
@@ -103,4 +106,3 @@ def fmt_time(sec):
     m = int(sec // 60)
     s = int(sec % 60)
     return f"{m:02d}:{s:02d}"
-

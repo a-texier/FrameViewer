@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -53,8 +51,10 @@ def _rectangle_graph() -> Graph:
         "out": {"type": "output_overlays", "params": {"vue": "vue2"}},
     }
     edges = [
-        ("x1", "valeur", "shape", "x1"), ("y1", "valeur", "shape", "y1"),
-        ("x2", "valeur", "shape", "x2"), ("y2", "valeur", "shape", "y2"),
+        ("x1", "valeur", "shape", "x1"),
+        ("y1", "valeur", "shape", "y1"),
+        ("x2", "valeur", "shape", "x2"),
+        ("y2", "valeur", "shape", "y2"),
         ("shape", "forme", "out", "forme"),
     ]
     return Graph(nodes, edges)
@@ -143,7 +143,8 @@ def test_plugin_api_csv_reader(tmp_path):
     path.write_text("frame,score\n0,0.8\n1,0.9\n", encoding="utf-8")
     api = PluginAPI(_Window(), str(tmp_path))
     assert api.read_csv_dict(path) == [
-        {"frame": "0", "score": "0.8"}, {"frame": "1", "score": "0.9"}
+        {"frame": "0", "score": "0.8"},
+        {"frame": "1", "score": "0.9"},
     ]
 
 

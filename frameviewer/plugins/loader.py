@@ -7,6 +7,7 @@ trusted; this is not a security sandbox. Imports and hook calls are isolated
 individually so one failing plugin is disabled without stopping the app or
 other overlays.
 """
+
 import contextlib
 import os
 import re
@@ -28,11 +29,13 @@ _ERR_RE = re.compile(r"ERREUR|EXCEPTION|Traceback|echec|échec|failed|Error", re
 
 def _now_hms():
     import time
+
     return time.strftime("%H:%M:%S")
 
 
 def _perf():
     import time
+
     return time.perf_counter()
 
 
@@ -40,27 +43,47 @@ def _indent(text, pad="    "):
     return "\n".join(pad + ln for ln in text.splitlines())
 
 
+def _is_plugin_file(path):
+    """True when ``path`` lives under one of the plugin roots."""
+    path = os.path.normcase(os.path.abspath(path))
+    for root in plugins_roots():
+        base = os.path.normcase(os.path.abspath(root)) + os.sep
+        if path.startswith(base):
+            return True
+    return False
+
+
 def _purge_sibling_modules(folder):
-    """Remove loaded sibling helpers so reloads always use current source."""
-    base = os.path.abspath(folder) + os.sep
+    """Remove loaded sibling helpers so reloads always use current source.
+
+    Only modules loaded from a plugin folder are dropped: a helper named like
+    a stdlib or app module (json.py, utils.py...) must never evict the real
+    one for the whole application.
+    """
+    base = os.path.normcase(os.path.abspath(folder)) + os.sep
     try:
-        local = {os.path.splitext(f)[0] for f in os.listdir(folder)
-                 if f.endswith(".py") and f != PLUGIN_MODULE_FILE}
+        local = {
+            os.path.splitext(f)[0]
+            for f in os.listdir(folder)
+            if f.endswith(".py") and f != PLUGIN_MODULE_FILE
+        }
     except OSError:
         local = set()
     for name in list(sys.modules):
-        if name in local:
-            del sys.modules[name]
+        fp = getattr(sys.modules.get(name), "__file__", None)
+        if not fp:
             continue
-        mod = sys.modules.get(name)
-        fp = getattr(mod, "__file__", None)
-        if fp and os.path.abspath(fp).startswith(base):
+        if os.path.normcase(os.path.abspath(fp)).startswith(base):
+            del sys.modules[name]
+        elif name in local and _is_plugin_file(fp):
+            # Same helper name in another plugin package (demo_utils.py...).
             del sys.modules[name]
 
 
 def _describe_result(res):
     """Return a compact hook-result description for test reports."""
     import numpy as np
+
     if res is None:
         return "None (rien a dessiner)"
     if isinstance(res, np.ndarray):
@@ -76,8 +99,8 @@ class _StreamTee:
     def __init__(self, prefix, tag, sink, original):
         self._prefix = prefix
         self._tag = tag
-        self._sink = sink            # callable(str)
-        self._original = original    # Original stream or None.
+        self._sink = sink  # callable(str)
+        self._original = original  # Original stream or None.
         self._buf = ""
 
     def write(self, s):
@@ -112,6 +135,7 @@ class _StreamTee:
 def environment_report(modules=("numpy", "cv2", "pandas", "polars", "PySide6")):
     """Report the executable, frozen state, and actual module locations."""
     import importlib
+
     lines = []
     lines.append(f"Python       : {sys.version.split()[0]}")
     lines.append(f"Executable   : {sys.executable}")
@@ -144,6 +168,7 @@ def environment_report(modules=("numpy", "cv2", "pandas", "polars", "PySide6")):
 def _alpha_stack(base, top):
     """Alpha-stack two BGRA overlays, clipping to common dimensions."""
     import numpy as np
+
     h = min(base.shape[0], top.shape[0])
     w = min(base.shape[1], top.shape[1])
     if h <= 0 or w <= 0:
@@ -208,9 +233,9 @@ class LoadedPlugin:
         self.instance = None
         self.enabled = False
         self.error = None
-        self.manifest = _manifest.load(folder)   # Version-two input contract.
-        self.last_run = None                     # Last execution time.
-        self.element_keys = {}                   # Overlay element key bindings.
+        self.manifest = _manifest.load(folder)  # Version-two input contract.
+        self.last_run = None  # Last execution time.
+        self.element_keys = {}  # Overlay element key bindings.
 
     @property
     def kind(self):
@@ -226,8 +251,8 @@ class PluginLoader:
 
     def __init__(self, mw):
         self._mw = mw
-        self.plugins = []          # [LoadedPlugin, ...]
-        self._log_records = []     # [{ts,pid,level,lineno,src,text}, ...]
+        self.plugins = []  # [LoadedPlugin, ...]
+        self._log_records = []  # [{ts,pid,level,lineno,src,text}, ...]
         # Enabled identifiers survive reloads and are restored before discovery.
         self._enabled_ids = set()
 
@@ -238,11 +263,19 @@ class PluginLoader:
             m = _TAG_RE.match(text)
             if m:
                 pid = m.group(1)
-                text = text[m.end():]
+                text = text[m.end() :]
         if level == "info" and _ERR_RE.search(text):
             level = "error"
-        self._log_records.append({"ts": _now_hms(), "pid": pid, "level": level,
-                                  "lineno": lineno, "src": src, "text": text})
+        self._log_records.append(
+            {
+                "ts": _now_hms(),
+                "pid": pid,
+                "level": level,
+                "lineno": lineno,
+                "src": src,
+                "text": text,
+            }
+        )
         # Bound memory use during long sessions.
         if len(self._log_records) > 5000:
             del self._log_records[: len(self._log_records) - 5000]
@@ -283,7 +316,7 @@ class PluginLoader:
 
     def discover_and_load(self):
         self.plugins = []
-        seen = set()   # Loaded identifiers; the first search root wins.
+        seen = set()  # Loaded identifiers; the first search root wins.
         for root in plugins_roots():
             if not os.path.isdir(root):
                 continue
@@ -294,7 +327,7 @@ class PluginLoader:
                 mod_path = os.path.join(folder, PLUGIN_MODULE_FILE)
                 if not os.path.isfile(mod_path):
                     continue
-                plugin_id = entry[len(PLUGIN_FOLDER_PREFIX):] or entry
+                plugin_id = entry[len(PLUGIN_FOLDER_PREFIX) :] or entry
                 if plugin_id in seen:
                     self.log(f"[{plugin_id}] doublon ignore ({folder}).")
                     continue
@@ -326,7 +359,7 @@ class PluginLoader:
                     cls = module.__dict__.get("PLUGIN")
                     if cls is None:
                         raise ImportError(f"{mod_path} : pas d'attribut PLUGIN = <classe>")
-                    instance = cls()      # Some plugins import dependencies here.
+                    instance = cls()  # Some plugins import dependencies here.
                     instance.on_load(api)
             finally:
                 try:
@@ -339,7 +372,7 @@ class PluginLoader:
             lp.enabled = lp.plugin_id in self._enabled_ids
             lp.error = None
             self.log(f"[{lp.plugin_id}] charge.")
-        except Exception:
+        except (Exception, SystemExit):
             lp.error = traceback.format_exc()
             lp.enabled = False
             self.log(f"[{lp.plugin_id}] ERREUR au chargement :\n{lp.error}")
@@ -381,7 +414,7 @@ class PluginLoader:
                 return default
             with self._capture(f"[{lp.plugin_id}]"):
                 return fn(*args)
-        except Exception:
+        except (Exception, SystemExit):
             lp.error = traceback.format_exc()
             lp.enabled = False
             self.log(f"[{lp.plugin_id}] ERREUR dans {method_name} -- désactivé :\n{lp.error}")
@@ -390,6 +423,7 @@ class PluginLoader:
     def run_plugin_test(self, plugin_id, frame_idx, size):
         """Run rendering hooks on demand without changing enabled state."""
         from frameviewer.plugins.api import FrameViewerPlugin, PluginAPI
+
         lp = next((l for l in self.plugins if l.plugin_id == plugin_id), None)
         if lp is None:
             return f"Plugin '{plugin_id}' introuvable."
@@ -409,7 +443,7 @@ class PluginLoader:
         ran = False
         for name, args in hooks:
             if getattr(cls, name) is getattr(FrameViewerPlugin, name):
-                continue   # Hook not overridden.
+                continue  # Hook not overridden.
             ran = True
             t0 = _perf()
             try:
@@ -420,8 +454,9 @@ class PluginLoader:
             except Exception:
                 out.append(f"  {name} -> EXCEPTION :\n{_indent(traceback.format_exc())}")
         if not ran:
-            out.append("  (aucun hook de rendu surcharge : "
-                       "get_overlays / render_overlay / render_panel)")
+            out.append(
+                "  (aucun hook de rendu surcharge : get_overlays / render_overlay / render_panel)"
+            )
         return "\n".join(out)
 
     # Aggregated hooks called by MainWindow for the active/primary view.
@@ -437,19 +472,18 @@ class PluginLoader:
     def collect_multiview_overlays(self, views_context):
         """Collect cross-view shapes from active plugins with isolated calls."""
         from frameviewer.plugins.api import FrameViewerPlugin
+
         out = []
         # Merge keys from every visible view so multi-view inputs do not depend
         # on which view is active.
         view_keys = [v.get("view_key") for v in (views_context or {}).get("views", [])]
         for lp in self.enabled_plugins():
-            if type(lp.instance).get_multiview_overlays is \
-                    FrameViewerPlugin.get_multiview_overlays:
-                continue   # Hook not overridden.
+            if type(lp.instance).get_multiview_overlays is FrameViewerPlugin.get_multiview_overlays:
+                continue  # Hook not overridden.
             merged = self._merged_contract(lp, view_keys)
             self._bind_inputs(lp, merged)
             api = PluginAPI(self._mw, lp.folder, lp.plugin_id, contract=merged)
-            res = self._safe_call(lp, "get_multiview_overlays", api,
-                                  views_context, default=[])
+            res = self._safe_call(lp, "get_multiview_overlays", api, views_context, default=[])
             if res:
                 out.extend(res)
         return out
@@ -459,7 +493,7 @@ class PluginLoader:
         merged = {}
         keys = [None] + [k for k in view_keys if k and k != "__none__"]
         for vk in keys:
-            for contract in (self._visible_contracts(lp, vk) or []):
+            for contract in self._visible_contracts(lp, vk) or []:
                 for name, path in contract.items():
                     if path and not merged.get(name):
                         merged[name] = path
@@ -471,11 +505,13 @@ class PluginLoader:
             api = PluginAPI(self._mw, lp.folder, lp.plugin_id)
             img = self._safe_call(lp, "render_patch", api, frame_idx, size, default=None)
             if img is not None:
-                out.append({
-                    "image": img,
-                    "corner": getattr(lp.instance, "corner", "tr"),
-                    "margin": getattr(lp.instance, "margin", 8),
-                })
+                out.append(
+                    {
+                        "image": img,
+                        "corner": getattr(lp.instance, "corner", "tr"),
+                        "margin": getattr(lp.instance, "margin", 8),
+                    }
+                )
         return out
 
     def build_panel(self, lp):
@@ -490,6 +526,7 @@ class PluginLoader:
     def _sync_element_keymap(self, lp, api):
         """Synchronize manifest key bindings with declared overlay elements."""
         from frameviewer.plugins.api import FrameViewerPlugin
+
         lp.element_keys = {}
         inst = lp.instance
         if inst is None or type(inst).overlay_elements is FrameViewerPlugin.overlay_elements:
@@ -499,8 +536,7 @@ class PluginLoader:
         try:
             elems = inst.overlay_elements(api) or []
         except Exception as e:
-            self.log(f"[{lp.plugin_id}] overlay_elements echoue (sync touches) : {e}",
-                     level="warn")
+            self.log(f"[{lp.plugin_id}] overlay_elements echoue (sync touches) : {e}", level="warn")
             return
         keys = []
         for item in elems:
@@ -547,6 +583,7 @@ class PluginLoader:
     def collect_overlay_image(self, frame_idx, size, view_key=None):
         """Alpha-compose active plugin overlays for each visible contract."""
         from frameviewer.plugins.api import FrameViewerPlugin
+
         w, h = int(size[0]), int(size[1])
         if w <= 0 or h <= 0:
             return None
@@ -556,9 +593,11 @@ class PluginLoader:
                 continue
             # Invoke once with an empty contract when no input exists. Plugins
             # can return None or provide an intentional fallback.
-            for contract in (self._visible_contracts(lp, view_key) or [{}]):
+            for contract in self._visible_contracts(lp, view_key) or [{}]:
                 self._bind_inputs(lp, contract)
-                api = PluginAPI(self._mw, lp.folder, lp.plugin_id, contract=contract, view_key=view_key)
+                api = PluginAPI(
+                    self._mw, lp.folder, lp.plugin_id, contract=contract, view_key=view_key
+                )
                 img = self._safe_call(lp, "render_overlay", api, frame_idx, (w, h), default=None)
                 if img is not None:
                     lp.last_run = _now_hms()
@@ -570,6 +609,7 @@ class PluginLoader:
     def render_plugin_panel(self, plugin_id, frame_idx, size):
         """Render the plugin-panel image for the first visible contract."""
         from frameviewer.plugins.api import FrameViewerPlugin
+
         lp = next((l for l in self.enabled_plugins() if l.plugin_id == plugin_id), None)
         if lp is None or type(lp.instance).render_panel is FrameViewerPlugin.render_panel:
             return None
@@ -580,9 +620,10 @@ class PluginLoader:
 
     def dispatch_hover(self, frame_idx, x, y):
         from frameviewer.plugins.api import FrameViewerPlugin
+
         for lp in self.enabled_plugins():
             if type(lp.instance).on_view_hover is FrameViewerPlugin.on_view_hover:
-                continue   # Avoid calls when hover is not implemented.
+                continue  # Avoid calls when hover is not implemented.
             contracts = self._visible_contracts(lp) or [{}]
             self._bind_inputs(lp, contracts[0])
             api = PluginAPI(self._mw, lp.folder, lp.plugin_id, contract=contracts[0])
@@ -590,6 +631,7 @@ class PluginLoader:
 
     def dispatch_click(self, frame_idx, x, y):
         from frameviewer.plugins.api import FrameViewerPlugin
+
         for lp in self.enabled_plugins():
             if type(lp.instance).on_view_click is FrameViewerPlugin.on_view_click:
                 continue
@@ -601,6 +643,7 @@ class PluginLoader:
     def dispatch_key(self, frame_idx, key, text):
         """Dispatch an unconsumed key and report whether a plugin handled it."""
         from frameviewer.plugins.api import FrameViewerPlugin
+
         handled = False
         for lp in self.enabled_plugins():
             if type(lp.instance).on_view_key is FrameViewerPlugin.on_view_key:
@@ -624,7 +667,9 @@ class PluginLoader:
         lp, api = accepting[0]
         if len(accepting) > 1:
             others = ", ".join(l.name for l, _ in accepting[1:])
-            self.log(f"Plusieurs plugins acceptent {path} -- '{lp.name}' "
-                    f"prend la main (autres candidats : {others}).")
+            self.log(
+                f"Plusieurs plugins acceptent {path} -- '{lp.name}' "
+                f"prend la main (autres candidats : {others})."
+            )
         self._safe_call(lp, "on_drop", api, path)
         return True

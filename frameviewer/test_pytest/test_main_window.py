@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 import tutorial_multiview_test as scenario_tests
 from PySide6 import QtWidgets
@@ -119,7 +118,8 @@ def test_view_context_exposes_offsets_and_common_base(qapp, data_dir):
     window._set_split("v2")
     lower = window._split_canvas.widget_at(1)
     scenario_tests._load_satellite(
-        window, lower,
+        window,
+        lower,
         sorted(str(path) for path in (data_dir / "traffic_ir").glob("*.png")),
         "traffic_ir",
     )

@@ -36,6 +36,7 @@ Adapter a votre CSV SANS le reformater : editez le dictionnaire COLS ci-dessous
 Le CSV reel pre-calcule doit etre depose explicitement dans l'entree
 `pairs_csv`. Sans CSV valide, le plugin ne dessine rien.
 """
+
 import os
 import csv
 
@@ -46,21 +47,31 @@ from frameviewer.plugins.api import FrameViewerPlugin
 
 # palette RGB (l'app lit color=(r,g,b)).
 _PALETTE = [
-    (255, 90, 90), (90, 200, 255), (120, 230, 120), (255, 200, 70),
-    (210, 130, 255), (255, 150, 200), (150, 255, 220), (255, 255, 120),
+    (255, 90, 90),
+    (90, 200, 255),
+    (120, 230, 120),
+    (255, 200, 70),
+    (210, 130, 255),
+    (255, 150, 200),
+    (150, 255, 220),
+    (255, 255, 120),
 ]
 
 # >>> EDITEZ ICI pour coller a votre CSV (roles -> noms de colonnes) <<<
 #   fa/fb = colonnes de frame des vues A / B ; xa..yb = coordonnees image.
 COLS = {
-    "h2":       {"fa": "frame_left", "fb": "frame_right",
-                 "xa": "xL", "ya": "yL", "xb": "xR", "yb": "yR"},
-    "temporal": {"fa": "frame_left", "fb": "frame_right",
-                 "xa": "xL", "ya": "yL", "xb": "xR", "yb": "yR"},
-    "v2":       {"fa": "frame_top",  "fb": "frame_bottom",
-                 "xa": "xT", "ya": "yT", "xb": "xB", "yb": "yB"},
+    "h2": {"fa": "frame_left", "fb": "frame_right", "xa": "xL", "ya": "yL", "xb": "xR", "yb": "yR"},
+    "temporal": {
+        "fa": "frame_left",
+        "fb": "frame_right",
+        "xa": "xL",
+        "ya": "yL",
+        "xb": "xR",
+        "yb": "yR",
+    },
+    "v2": {"fa": "frame_top", "fb": "frame_bottom", "xa": "xT", "ya": "yT", "xb": "xB", "yb": "yB"},
 }
-ID_COL = "id"        # optionnel (code couleur) ; mettre None pour l'ignorer
+ID_COL = "id"  # optionnel (code couleur) ; mettre None pour l'ignorer
 CONFIDENCE_COL = "confidence"
 
 
@@ -80,15 +91,17 @@ def _to_float(v):
 
 class Demo2MultivueKptsPlugin(FrameViewerPlugin):
     name = "demo_2_multivue_kpts"
-    description = ("Demo : relie des keypoints appartes entre 2 vues "
-                   "(gauche/droite, temporel i-N|i, ou haut/bas).")
+    description = (
+        "Demo : relie des keypoints appartes entre 2 vues "
+        "(gauche/droite, temporel i-N|i, ou haut/bas)."
+    )
 
     def on_load(self, api):
         """Init de l'etat. IN: api (PluginAPI, non utilise ici). OUT: None.
         `self.pairs_csv` (chemin du CSV depose) est injecte par le loader avant
         chaque appel de hook (None si rien de depose)."""
-        self._cache_key = None    # (chemin, mtime) du CSV deja parse
-        self._rows = []           # lignes brutes du CSV (list[dict])
+        self._cache_key = None  # (chemin, mtime) du CSV deja parse
+        self._rows = []  # lignes brutes du CSV (list[dict])
         self._data_status = "CSV non charge"
         self._min_confidence = 0.70
         self._radius = 11
@@ -151,12 +164,31 @@ class Demo2MultivueKptsPlugin(FrameViewerPlugin):
             # A score normalise de 0.5 conserve exactement la taille choisie.
             radius *= 0.55 + 0.90 * max(0.0, min(1.0, normalized))
         return [
-            {"type": "cercle", "view": ia, "points": [a],
-             "a": radius, "color": col, "thickness": self._thickness},
-            {"type": "cercle", "view": ib, "points": [b],
-             "a": radius, "color": col, "thickness": self._thickness},
-            {"type": "segment_inter_vues", "va": ia, "pa": a,
-             "vb": ib, "pb": b, "color": col, "thickness": self._thickness},
+            {
+                "type": "cercle",
+                "view": ia,
+                "points": [a],
+                "a": radius,
+                "color": col,
+                "thickness": self._thickness,
+            },
+            {
+                "type": "cercle",
+                "view": ib,
+                "points": [b],
+                "a": radius,
+                "color": col,
+                "thickness": self._thickness,
+            },
+            {
+                "type": "segment_inter_vues",
+                "va": ia,
+                "pa": a,
+                "vb": ib,
+                "pb": b,
+                "color": col,
+                "thickness": self._thickness,
+            },
         ]
 
     def _ensure_rows(self):
@@ -174,9 +206,21 @@ class Demo2MultivueKptsPlugin(FrameViewerPlugin):
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             fields = set(reader.fieldnames or [])
-            required = {"frame_left", "frame_right", "frame_top", "frame_bottom",
-                        "xL", "yL", "xR", "yR", "xT", "yT", "xB", "yB",
-                        "confidence"}
+            required = {
+                "frame_left",
+                "frame_right",
+                "frame_top",
+                "frame_bottom",
+                "xL",
+                "yL",
+                "xR",
+                "yR",
+                "xT",
+                "yT",
+                "xB",
+                "yB",
+                "confidence",
+            }
             if not required.issubset(fields):
                 self._rows = []
                 self._data_status = "CSV invalide"
@@ -223,16 +267,19 @@ class Demo2MultivueKptsPlugin(FrameViewerPlugin):
         for i, row, (xa, ya, xb, yb), confidence in pairs:
             pid = row.get(ID_COL) if ID_COL else None
             normalized = self._normalize_score(confidence, bounds)
-            color = (self._score_color(normalized) if self._score_colormap
-                     else self._track_color(pid, i))
-            specs += self._pair_specs(A["index"], (xa, ya),
-                                      B["index"], (xb, yb),
-                                      color, normalized)
-        specs.append({
-            "type": "texte_ecran", "view": A["index"],
-            "label": f"{len(pairs)} keypoints apparies",
-            "color": (245, 245, 245), "background": (20, 20, 25, 205),
-        })
+            color = (
+                self._score_color(normalized) if self._score_colormap else self._track_color(pid, i)
+            )
+            specs += self._pair_specs(A["index"], (xa, ya), B["index"], (xb, yb), color, normalized)
+        specs.append(
+            {
+                "type": "texte_ecran",
+                "view": A["index"],
+                "label": f"{len(pairs)} keypoints apparies",
+                "color": (245, 245, 245),
+                "background": (20, 20, 25, 205),
+            }
+        )
         self._update_panel_status()
         return specs
 
@@ -259,12 +306,36 @@ class Demo2MultivueKptsPlugin(FrameViewerPlugin):
         panel = np.full((104, width, 3), 25, np.uint8)
         self._ensure_rows()
         status = self._data_status
-        cv2.putText(panel, status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.52, (120, 230, 120) if self._rows else (80, 80, 230), 1, cv2.LINE_AA)
-        cv2.putText(panel, f"confiance >= {self._min_confidence:.2f}", (10, 54),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (230, 230, 230), 1, cv2.LINE_AA)
-        cv2.putText(panel, f"frame : {self._frame_match_count} appariements", (10, 82),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (230, 230, 230), 1, cv2.LINE_AA)
+        cv2.putText(
+            panel,
+            status,
+            (10, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.52,
+            (120, 230, 120) if self._rows else (80, 80, 230),
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            panel,
+            f"confiance >= {self._min_confidence:.2f}",
+            (10, 54),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (230, 230, 230),
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            panel,
+            f"frame : {self._frame_match_count} appariements",
+            (10, 82),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (230, 230, 230),
+            1,
+            cv2.LINE_AA,
+        )
         return panel
 
     def _update_panel_status(self):
@@ -273,22 +344,24 @@ class Demo2MultivueKptsPlugin(FrameViewerPlugin):
             if self._panel_status_label is not None:
                 name = os.path.basename(path) if path else "aucun CSV"
                 self._panel_status_label.setText(
-                    f"CSV reel : {name}\n{len(self._rows)} lignes au total")
+                    f"CSV reel : {name}\n{len(self._rows)} lignes au total"
+                )
                 self._panel_status_label.setToolTip(path or "")
             if self._panel_match_label is not None:
                 self._panel_match_label.setText(
-                    f"Frame courante : {self._frame_match_count} correspondances visibles")
+                    f"Frame courante : {self._frame_match_count} correspondances visibles"
+                )
             if self._panel_colorbar is not None:
                 lo, median, hi = self._active_score_bounds
                 scope = "frame" if self._score_scope == "frame" else "CSV complet"
-                self._panel_colorbar.setText(
-                    f"{lo:.3f}   mediane {median:.3f}   {hi:.3f}\n{scope}")
+                self._panel_colorbar.setText(f"{lo:.3f}   mediane {median:.3f}   {hi:.3f}\n{scope}")
                 self._panel_colorbar.setStyleSheet(
                     "QLabel{color:#17171c;font-weight:bold;padding:4px;"
                     "border:1px solid #555;border-radius:3px;"
                     "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
                     "stop:0 rgb(220,55,55),stop:0.5 rgb(238,232,220),"
-                    "stop:1 rgb(55,120,225));}")
+                    "stop:1 rgb(55,120,225));}"
+                )
         except RuntimeError:
             self._panel_status_label = None
             self._panel_match_label = None
@@ -296,16 +369,22 @@ class Demo2MultivueKptsPlugin(FrameViewerPlugin):
 
     def build_panel(self, api):
         from PySide6 import QtCore, QtWidgets
+
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QFormLayout(widget)
         threshold = QtWidgets.QDoubleSpinBox()
         threshold.setObjectName("multiview_confidence")
-        threshold.setRange(0.0, 1.0); threshold.setSingleStep(0.05)
+        threshold.setRange(0.0, 1.0)
+        threshold.setSingleStep(0.05)
         threshold.setValue(self._min_confidence)
-        radius = QtWidgets.QSpinBox(); radius.setObjectName("multiview_radius")
-        radius.setRange(2, 20); radius.setValue(self._radius)
-        thickness = QtWidgets.QSpinBox(); thickness.setObjectName("multiview_thickness")
-        thickness.setRange(1, 8); thickness.setValue(self._thickness)
+        radius = QtWidgets.QSpinBox()
+        radius.setObjectName("multiview_radius")
+        radius.setRange(2, 20)
+        radius.setValue(self._radius)
+        thickness = QtWidgets.QSpinBox()
+        thickness.setObjectName("multiview_thickness")
+        thickness.setRange(1, 8)
+        thickness.setValue(self._thickness)
         scale = QtWidgets.QCheckBox("Taille proportionnelle a la confiance")
         scale.setObjectName("multiview_scale_confidence")
         scale.setChecked(self._scale_by_confidence)
@@ -318,18 +397,29 @@ class Demo2MultivueKptsPlugin(FrameViewerPlugin):
         scope.addItem("Absolu sur tout le CSV", "csv")
         scope.setCurrentIndex(max(0, scope.findData(self._score_scope)))
         threshold.valueChanged.connect(
-            lambda value: (setattr(self, "_min_confidence", float(value)), api.request_repaint()))
+            lambda value: (setattr(self, "_min_confidence", float(value)), api.request_repaint())
+        )
         radius.valueChanged.connect(
-            lambda value: (setattr(self, "_radius", int(value)), api.request_repaint()))
+            lambda value: (setattr(self, "_radius", int(value)), api.request_repaint())
+        )
         thickness.valueChanged.connect(
-            lambda value: (setattr(self, "_thickness", int(value)), api.request_repaint()))
+            lambda value: (setattr(self, "_thickness", int(value)), api.request_repaint())
+        )
         scale.toggled.connect(
-            lambda value: (setattr(self, "_scale_by_confidence", bool(value)), api.request_repaint()))
+            lambda value: (
+                setattr(self, "_scale_by_confidence", bool(value)),
+                api.request_repaint(),
+            )
+        )
         colormap.toggled.connect(
-            lambda value: (setattr(self, "_score_colormap", bool(value)), api.request_repaint()))
+            lambda value: (setattr(self, "_score_colormap", bool(value)), api.request_repaint())
+        )
         scope.currentIndexChanged.connect(
-            lambda _index: (setattr(self, "_score_scope", scope.currentData()),
-                            api.request_repaint()))
+            lambda _index: (
+                setattr(self, "_score_scope", scope.currentData()),
+                api.request_repaint(),
+            )
+        )
         self._panel_status_label = QtWidgets.QLabel()
         self._panel_status_label.setWordWrap(True)
         self._panel_status_label.setObjectName("multiview_csv_status")

@@ -8,24 +8,54 @@ passed; each plugin owns parsing and format validation.
 Packages without ``manifest.json`` receive a backward-compatible inferred
 contract based on their contents.
 """
+
 import json
+import keyword
 import os
+import re
 
 MANIFEST_FILE = "manifest.json"
 
 
+def _input_name(item):
+    """Input name as a Python identifier, or "" when unusable.
+
+    The loader assigns ``self.<name> = path``; anything else than an
+    identifier would fail there, so legacy labels such as "CSV BBOX" are
+    folded to "csv_bbox".
+    """
+    if isinstance(item, str):
+        name = item
+    elif isinstance(item, dict):
+        name = str(item.get("name", ""))
+    else:
+        return ""
+    name = name.strip()
+    if name and not name.isidentifier():
+        name = re.sub(r"\W+", "_", name).strip("_").lower()
+        if name[:1].isdigit():
+            name = "_" + name
+    if not name.isidentifier() or keyword.iskeyword(name):
+        return ""
+    return name
+
+
 def normalize(data, folder):
     """Validate and complete a raw manifest with safe defaults."""
-    data = data or {}
+    if not isinstance(data, dict):
+        data = {}  # e.g. a JSON list: fall back to the inferred contract
     kind = data.get("kind")
     if kind not in ("code", "graph"):
         kind = "graph" if os.path.isfile(os.path.join(folder, "graph.json")) else "code"
     inputs = []
     seen = set()
-    for it in data.get("inputs", []) or []:
+    raw_inputs = data.get("inputs", []) or []
+    if not isinstance(raw_inputs, list):
+        raw_inputs = []
+    for it in raw_inputs:
         # Accept either a string or a mapping. Legacy type metadata is ignored
         # because the contract transports paths only.
-        name = (it if isinstance(it, str) else str(it.get("name", ""))).strip()
+        name = _input_name(it)
         if not name or name in seen:
             continue
         seen.add(name)
@@ -37,11 +67,11 @@ def normalize(data, folder):
     if isinstance(raw_keys, dict):
         for k, v in raw_keys.items():
             if isinstance(k, str) and k:
-                elem_keys[k] = (str(v)[:8] if v else "m")
+                elem_keys[k] = str(v)[:8] if v else "m"
     out = {
-        "name": (data.get("name") or os.path.basename(folder)).strip(),
+        "name": str(data.get("name") or os.path.basename(folder)).strip(),
         "kind": kind,
-        "frame_input": (data.get("frame_input") or "Current Frame").strip(),
+        "frame_input": str(data.get("frame_input") or "Current Frame").strip(),
         "inputs": inputs,
     }
     if elem_keys:

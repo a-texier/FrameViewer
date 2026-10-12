@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Icones vectorielles dessinees a la volee (QPainter), sans dependre d'une
-police d'emoji. Sur Linux sans police emoji, les glyphes 📷/🔊/📋... s'affichent
+police d'emoji. Sur Linux sans police emoji, les glyphes emoji s'affichent
 en rectangles (tofu) : ces icones les remplacent partout.
 
 Usage :
@@ -9,10 +9,12 @@ Usage :
     btn.setText("")               # retirer l'emoji du libelle
     tabs.addTab(w, icons.icon("layers"), "Hist / Calque")
 """
+
 from PySide6 import QtCore, QtGui
 from PySide6.QtCore import Qt
 
 _DEFAULT_COLOR = "#cdd6e0"
+_LIGHT_THEME_COLOR = "#3b4250"
 
 
 def _pt(seq):
@@ -20,6 +22,7 @@ def _pt(seq):
 
 
 # --- fonctions de dessin : recoivent un QPainter sur un canvas 18x18 ---
+
 
 def _camera(p):
     p.drawRoundedRect(QtCore.QRectF(2, 5.5, 14, 9.5), 1.5, 1.5)
@@ -63,6 +66,7 @@ def _puzzle(p):
 
 def _gear(p):
     import math
+
     p.save()
     p.translate(9, 9)
     for k in range(8):
@@ -228,6 +232,107 @@ def _close(p):
     p.drawLine(13.5, 4.5, 4.5, 13.5)
 
 
+def _pause(p):
+    p.setBrush(p.pen().color())
+    p.drawRect(QtCore.QRectF(5, 4, 2.6, 10))
+    p.drawRect(QtCore.QRectF(10.4, 4, 2.6, 10))
+
+
+def _step_back(p):
+    p.setBrush(p.pen().color())
+    p.drawPolygon(QtGui.QPolygonF(_pt([(13, 4), (5.5, 9), (13, 14)])))
+
+
+def _step_forward(p):
+    p.setBrush(p.pen().color())
+    p.drawPolygon(QtGui.QPolygonF(_pt([(5, 4), (12.5, 9), (5, 14)])))
+
+
+def _skip_first(p):
+    p.drawLine(4.5, 4, 4.5, 14)
+    p.setBrush(p.pen().color())
+    p.drawPolygon(QtGui.QPolygonF(_pt([(14, 4), (6.5, 9), (14, 14)])))
+
+
+def _skip_last(p):
+    p.drawLine(13.5, 4, 13.5, 14)
+    p.setBrush(p.pen().color())
+    p.drawPolygon(QtGui.QPolygonF(_pt([(4, 4), (11.5, 9), (4, 14)])))
+
+
+def _download(p):
+    # export / extraction : fleche vers un plateau
+    p.drawLine(9, 2.5, 9, 11)
+    p.drawPolyline(QtGui.QPolygonF(_pt([(5.5, 7.5), (9, 11), (12.5, 7.5)])))
+    p.drawPolyline(QtGui.QPolygonF(_pt([(3, 12), (3, 15), (15, 15), (15, 12)])))
+
+
+def _grid(p):
+    p.drawRect(QtCore.QRectF(2.5, 3.5, 13, 11))
+    p.drawLine(9, 3.5, 9, 14.5)
+    p.drawLine(2.5, 9, 15.5, 9)
+
+
+def _blend(p):
+    p.drawEllipse(QtCore.QPointF(7, 9), 4.5, 4.5)
+    p.drawEllipse(QtCore.QPointF(11, 9), 4.5, 4.5)
+
+
+def _warning(p):
+    p.drawPolygon(QtGui.QPolygonF(_pt([(9, 2.5), (16, 15), (2, 15)])))
+    p.drawLine(9, 7, 9, 11)
+    p.drawPoint(QtCore.QPointF(9, 13))
+
+
+# --- dispositions des vues (menu Vues) : schema des cadres a l'ecran ---
+
+
+def _cells(p, rects, dashed=()):
+    """Dessine des cases (x, y, w, h) ; les indices de ``dashed`` en pointilles."""
+    pen = p.pen()
+    for i, (x, y, w, h) in enumerate(rects):
+        if i in dashed:
+            dash = QtGui.QPen(pen)
+            dash.setStyle(Qt.DashLine)
+            p.setPen(dash)
+        p.drawRect(QtCore.QRectF(x, y, w, h))
+        p.setPen(pen)
+
+
+def _layout_1(p):
+    _cells(p, [(2, 3, 14, 12)])
+
+
+def _layout_h2(p):
+    _cells(p, [(1.5, 3, 7, 12), (9.5, 3, 7, 12)])
+
+
+def _layout_v2(p):
+    _cells(p, [(2, 2, 14, 6.5), (2, 9.5, 14, 6.5)])
+
+
+def _layout_h3(p):
+    _cells(p, [(1, 3, 4.6, 12), (6.7, 3, 4.6, 12), (12.4, 3, 4.6, 12)])
+
+
+def _layout_q4(p):
+    _cells(p, [(2, 2, 6.5, 6.5), (9.5, 2, 6.5, 6.5), (2, 9.5, 6.5, 6.5), (9.5, 9.5, 6.5, 6.5)])
+
+
+def _layout_fusion(p):
+    # deux sources en haut, rendu fusionne en bas
+    _cells(p, [(2, 2, 6.5, 5), (9.5, 2, 6.5, 5), (2, 8.5, 14, 7.5)])
+    p.drawEllipse(QtCore.QPointF(7.8, 12.2), 2.2, 2.2)
+    p.drawEllipse(QtCore.QPointF(10.2, 12.2), 2.2, 2.2)
+
+
+def _layout_temporal(p):
+    # gauche : frame passee i-N (pointilles), droite : frame courante i
+    _cells(p, [(1.5, 3, 7, 12), (9.5, 3, 7, 12)], dashed=(0,))
+    p.drawLine(QtCore.QPointF(6, 9), QtCore.QPointF(12, 9))
+    p.drawPolyline(QtGui.QPolygonF(_pt([(10.5, 7.5), (12, 9), (10.5, 10.5)])))
+
+
 _DRAW = {
     "camera": _camera,
     "speaker": _speaker,
@@ -258,17 +363,39 @@ _DRAW = {
     "reticle": _reticle,
     "plus": _plus,
     "close": _close,
+    "pause": _pause,
+    "step_back": _step_back,
+    "step_forward": _step_forward,
+    "skip_first": _skip_first,
+    "skip_last": _skip_last,
+    "download": _download,
+    "grid": _grid,
+    "blend": _blend,
+    "warning": _warning,
+    "layout_1": _layout_1,
+    "layout_h2": _layout_h2,
+    "layout_v2": _layout_v2,
+    "layout_h3": _layout_h3,
+    "layout_q4": _layout_q4,
+    "layout_fusion": _layout_fusion,
+    "layout_temporal": _layout_temporal,
 }
 
 
-def pixmap(name, size=18, color=_DEFAULT_COLOR, width=1.4):
+def _themed_default():
+    from frameviewer.ui.theming import is_light
+
+    return _LIGHT_THEME_COLOR if is_light() else _DEFAULT_COLOR
+
+
+def pixmap(name, size=18, color=None, width=1.4):
     pm = QtGui.QPixmap(size, size)
     pm.fill(Qt.transparent)
     p = QtGui.QPainter(pm)
     p.setRenderHint(QtGui.QPainter.Antialiasing, True)
     if size != 18:
         p.scale(size / 18.0, size / 18.0)
-    pen = QtGui.QPen(QtGui.QColor(color))
+    pen = QtGui.QPen(QtGui.QColor(color or _themed_default()))
     pen.setWidthF(width)
     pen.setJoinStyle(Qt.RoundJoin)
     pen.setCapStyle(Qt.RoundCap)
@@ -281,7 +408,43 @@ def pixmap(name, size=18, color=_DEFAULT_COLOR, width=1.4):
     return pm
 
 
-def icon(name, size=18, color=_DEFAULT_COLOR, width=1.4):
+class _ThemedIconEngine(QtGui.QIconEngine):
+    """Icone redessinee a la demande dans la couleur du theme courant : un
+    changement de theme la met a jour sans recreer les boutons."""
+
+    def __init__(self, name, width):
+        super().__init__()
+        self._name = name
+        self._width = width
+
+    def paint(self, painter, rect, mode, state):
+        side = max(1, min(rect.width(), rect.height()))
+        # bouton coche / onglet selectionne : pose sur un fond d'accent fonce,
+        # l'icone y reste claire quel que soit le theme
+        color = _DEFAULT_COLOR if state == QtGui.QIcon.On else None
+        pm = pixmap(self._name, side, color, self._width)
+        if mode == QtGui.QIcon.Disabled:
+            painter.setOpacity(0.4)
+        painter.drawPixmap(
+            rect.x() + (rect.width() - side) // 2, rect.y() + (rect.height() - side) // 2, pm
+        )
+
+    def pixmap(self, size, mode, state):
+        pm = QtGui.QPixmap(size)
+        pm.fill(Qt.transparent)
+        p = QtGui.QPainter(pm)
+        self.paint(p, QtCore.QRect(QtCore.QPoint(0, 0), size), mode, state)
+        p.end()
+        return pm
+
+    def clone(self):
+        return _ThemedIconEngine(self._name, self._width)
+
+
+def icon(name, size=18, color=None, width=1.4):
+    """Icone vectorielle ; sans ``color`` elle suit le theme (sombre/clair)."""
+    if color is None:
+        return QtGui.QIcon(_ThemedIconEngine(name, width))
     return QtGui.QIcon(pixmap(name, size, color, width))
 
 
@@ -296,7 +459,7 @@ def restyle_dock_titlebar_buttons(dock):
     au deplacement/detachement natifs du dock."""
     close_btn = dock.findChild(QtCore.QObject, "qt_dockwidget_closebutton")
     if close_btn is not None:
-        close_btn.setIcon(icon("close", size=12, color="#e6e6e6"))
+        close_btn.setIcon(icon("close", size=12))
     float_btn = dock.findChild(QtCore.QObject, "qt_dockwidget_floatbutton")
     if float_btn is not None:
-        float_btn.setIcon(icon("window", size=12, color="#e6e6e6"))
+        float_btn.setIcon(icon("window", size=12))

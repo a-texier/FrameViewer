@@ -4,7 +4,9 @@
 Concrete implementations cover video, image sequences, raw streams and
 optional formats. A virtual source renders two inputs as a blend.
 """
+
 import os
+import time
 
 import cv2
 import numpy as np
@@ -16,12 +18,12 @@ from .pipeline import blend_frames, render_frame
 
 # Supported raw YUV layouts: identifier -> (display label, bytes per pixel).
 YUV_FORMATS = {
-    "gray8":    ("Gris 8-bit (Y seul)",             1.0),
+    "gray8": ("Gris 8-bit (Y seul)", 1.0),
     "gray16le": ("Gris 16-bit little-endian (Y seul)", 2.0),
-    "i420":     ("YUV 4:2:0 planaire (I420 / IYUV)", 1.5),
-    "nv12":     ("YUV 4:2:0 semi-planaire (NV12)",   1.5),
-    "yuyv":     ("YUV 4:2:2 entrelace (YUYV / YUY2)", 2.0),
-    "uyvy":     ("YUV 4:2:2 entrelace (UYVY)",        2.0),
+    "i420": ("YUV 4:2:0 planaire (I420 / IYUV)", 1.5),
+    "nv12": ("YUV 4:2:0 semi-planaire (NV12)", 1.5),
+    "yuyv": ("YUV 4:2:2 entrelace (YUYV / YUY2)", 2.0),
+    "uyvy": ("YUV 4:2:2 entrelace (UYVY)", 2.0),
 }
 
 
@@ -60,6 +62,15 @@ def decode_yuv(data, width, height, fmt):
         return cv2.cvtColor(buf.reshape(h, w, 2), cv2.COLOR_YUV2BGR_UYVY)
     return None
 
+
+def _fourcc_text(value):
+    """FOURCC code reported by OpenCV as readable text ("avc1", "MJPG"...)."""
+    code = int(value or 0)
+    text = "".join(chr((code >> (8 * i)) & 0xFF) for i in range(4))
+    text = text.strip("\x00 ")
+    return text if text.isprintable() else ""
+
+
 class VideoSource:
     is_raw = False
 
@@ -69,9 +80,17 @@ class VideoSource:
         if not self.cap.isOpened():
             raise IOError(f"OpenCV ne parvient pas a ouvrir:\n{path}")
         n = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if n <= 0:
+            # Container without a frame count (some webm/mkv/ts): count it once
+            # so navigation and the slider get a real length.
+            n = self._count_by_grabbing(path)
         self._count = n if n > 0 else 0
+        # False only when even the counting pass failed: the length is then
+        # learned while decoding (see _learn_count).
+        self._count_known = self._count > 0
         fps = self.cap.get(cv2.CAP_PROP_FPS)
         self._fps = float(fps) if fps and fps > 0 else 25.0
+        self.codec = _fourcc_text(self.cap.get(cv2.CAP_PROP_FOURCC))
         self._next = 0
         # Some containers and codecs do not expose a reliable frame index.
         # Once random access fails, use sequential decoding with rewind as the
@@ -86,10 +105,34 @@ class VideoSource:
     def fps(self):
         return self._fps
 
+    @staticmethod
+    def _count_by_grabbing(path):
+        """Count frames with a separate capture (grab only, no conversion)."""
+        cap = cv2.VideoCapture(path)
+        n = 0
+        try:
+            while cap.isOpened() and cap.grab():
+                n += 1
+        finally:
+            cap.release()
+        return n
+
     def _learn_count(self, idx):
         self._next = idx + 1
-        if self._count == 0:
-            self._count = idx + 1  # longueur inconnue: on l'apprend au fil de l'eau
+        if not self._count_known:
+            # Unknown length: stay one frame ahead so stepping forward keeps
+            # working until a read fails and _reached_end fixes the count.
+            self._count = max(self._count, idx + 2)
+
+    def _reached_end(self, frames_read):
+        """A read failed after ``frames_read`` frames: that is the real length.
+
+        Containers often over-estimate CAP_PROP_FRAME_COUNT (VFR, mkv, ts);
+        without this the last indices would keep failing.
+        """
+        if frames_read > 0 and (not self._count_known or frames_read < self._count):
+            self._count = frames_read
+            self._count_known = True
 
     def _get_sequential(self, idx):
         """Decode sequentially to ``idx``, rewinding only when moving backward."""
@@ -100,11 +143,12 @@ class VideoSource:
         while self._next <= idx:
             ok, f = self.cap.read()
             if not ok:
+                self._reached_end(self._next)
                 return None
             frame = f
             self._next += 1
-        if self._count == 0:
-            self._count = idx + 1
+        if not self._count_known:
+            self._count = max(self._count, idx + 2)
         return frame
 
     def get(self, idx):
@@ -126,9 +170,15 @@ class VideoSource:
         if ok:
             self._learn_count(idx)
             return frame
-        # Remember that native seeking is broken for this stream.
-        self._seek_unreliable = True
-        return self._get_sequential(idx)
+        # The seek failed: either this stream cannot seek, or idx is past the
+        # real end. The decoder position is unknown now, so restart from 0.
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self._next = 0
+        frame = self._get_sequential(idx)
+        if frame is not None:
+            # The frame exists, only native seeking is broken for this stream.
+            self._seek_unreliable = True
+        return frame
 
     def close(self):
         try:
@@ -195,10 +245,10 @@ class YuvSource:
     Raw media has no header, so the import dialog supplies geometry and layout.
     Frames are read and decoded on demand.
     """
+
     is_raw = False
 
-    def __init__(self, paths, width, height, fmt, label="yuv",
-                 directory=None, fps=12.0):
+    def __init__(self, paths, width, height, fmt, label="yuv", directory=None, fps=12.0):
         self.paths = list(paths)
         if not self.paths:
             raise IOError("Sequence YUV vide.")
@@ -244,6 +294,7 @@ class YuvSource:
 
 class SpecializedSource:
     """Random-access optional sequence source preserving native frame types."""
+
     is_raw = True
 
     def __init__(self, path):
@@ -284,6 +335,54 @@ class SpecializedSource:
         return os.path.splitext(os.path.basename(self.path))[0]
 
 
+def frame_path(src, idx):
+    """File holding frame ``idx``: one file per frame, else the media file."""
+    paths = getattr(src, "paths", None)
+    if paths:
+        return paths[idx] if 0 <= idx < len(paths) else ""
+    return str(getattr(src, "path", "") or "")
+
+
+def frame_info(src, idx, frame=None, display_scale=1.0):
+    """One-line description of frame ``idx`` for the info bar under a view.
+
+    File, size, sample type, codec, fps, position and time stamp. For one
+    file per frame the time stamp is the file modification time; for a single
+    media file it is the position at the nominal frame rate.
+    """
+    if src is None:
+        return ""
+    parts = []
+    path = frame_path(src, idx)
+    if path:
+        parts.append(path)
+    if frame is not None:
+        h, w = frame.shape[:2]
+        channels = frame.shape[2] if frame.ndim == 3 else 1
+        size = f"{w}x{h}"
+        if display_scale and display_scale < 1.0:
+            size += f" (1:{round(1.0 / display_scale)})"
+        parts.append(size)
+        parts.append(f"{frame.dtype} {channels}ch")
+    codec = getattr(src, "codec", "")
+    if codec:
+        parts.append(codec)
+    fps = float(getattr(src, "fps", 0.0) or 0.0)
+    if fps > 0:
+        parts.append(f"{fps:.2f} fps")
+    count = int(getattr(src, "count", 0) or 0)
+    parts.append(f"frame {idx}/{max(0, count - 1)}" if count else f"frame {idx}")
+    if getattr(src, "paths", None) and path:
+        try:
+            stamp = time.localtime(os.path.getmtime(path))
+            parts.append(time.strftime("%Y-%m-%d %H:%M:%S", stamp))
+        except OSError:
+            pass
+    elif fps > 0:
+        parts.append(f"t={idx / fps:.3f} s")
+    return "  |  ".join(parts)
+
+
 def describe_source(src):
     """Return a human-readable source description for export dialogs."""
     if src is None:
@@ -321,7 +420,6 @@ def describe_source(src):
     return kind + ("  —  " + " · ".join(extra) if extra else "")
 
 
-
 class FusionSource:
     """Virtual source that blends two rendered sources frame by frame.
 
@@ -329,11 +427,23 @@ class FusionSource:
     source display windows when created.
     """
 
-    def __init__(self, src_a, rp_a, src_b, rp_b, lut_data, cube_lut, cube_size,
-                 full_range, filters, alpha, mode="alpha"):
+    def __init__(
+        self,
+        src_a,
+        rp_a,
+        src_b,
+        rp_b,
+        lut_data,
+        cube_lut,
+        cube_size,
+        full_range,
+        filters,
+        alpha,
+        mode="alpha",
+    ):
         self._a = src_a
         self._b = src_b
-        self._rpa = rp_a           # Display window for source A.
+        self._rpa = rp_a  # Display window for source A.
         self._rpb = rp_b
         self._lut = lut_data
         self._cube = cube_lut
@@ -346,7 +456,7 @@ class FusionSource:
         nb = src_b.count if src_b else 0
         self._count = min(na, nb) if (na and nb) else max(na, nb)
         self.fps = getattr(src_a, "fps", 25.0) or 25.0
-        self.name = "Fusion (A⊕B)"
+        self.name = "Fusion (A+B)"
 
     @property
     def count(self):
@@ -364,8 +474,9 @@ class FusionSource:
         raw = src.get(idx) if src else None
         if raw is None:
             return None
-        bgr = render_frame(raw, rp[0], rp[1], self._lut, self._cube,
-                           self._csize, self._full, self._filters)
+        bgr = render_frame(
+            raw, rp[0], rp[1], self._lut, self._cube, self._csize, self._full, self._filters
+        )
         if bgr.ndim == 2:
             bgr = cv2.cvtColor(bgr, cv2.COLOR_GRAY2BGR)
         return bgr

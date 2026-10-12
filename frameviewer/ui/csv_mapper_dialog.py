@@ -3,13 +3,20 @@
 "x1"...) aux colonnes REELLES d'un CSV dont les noms varient d'un fichier a
 l'autre. Outil generique, reutilisable par n'importe quel plugin via
 PluginAPI.map_csv_columns() -- voir docs/plugins.md."""
+
 from PySide6 import QtWidgets
 
 
 class CsvColumnMapperDialog(QtWidgets.QDialog):
-
-    def __init__(self, parent, header, roles, sample_rows=None,
-                optional_roles=None, title="Associer les colonnes du CSV"):
+    def __init__(
+        self,
+        parent,
+        header,
+        roles,
+        sample_rows=None,
+        optional_roles=None,
+        title="Associer les colonnes du CSV",
+    ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumWidth(520)
@@ -28,7 +35,8 @@ class CsvColumnMapperDialog(QtWidgets.QDialog):
             "Indique quelle colonne du fichier correspond à chaque "
             "information attendue (les noms de colonnes peuvent varier "
             "d'un fichier à l'autre -- ce choix sera mémorisé pour ce "
-            "fichier).")
+            "fichier)."
+        )
         info.setWordWrap(True)
         vbox.addWidget(info)
 
@@ -65,7 +73,8 @@ class CsvColumnMapperDialog(QtWidgets.QDialog):
         vbox.addWidget(note)
 
         btns = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
         btns.accepted.connect(self._on_accept)
         btns.rejected.connect(self.reject)
         vbox.addWidget(btns)
@@ -82,13 +91,15 @@ class CsvColumnMapperDialog(QtWidgets.QDialog):
         return None
 
     def _on_accept(self):
-        missing = [r for r in self._roles
-                  if r not in self._optional
-                  and self._combos[r].currentIndex() == 0]
+        missing = [
+            r
+            for r in self._roles
+            if r not in self._optional and self._combos[r].currentIndex() == 0
+        ]
         if missing:
             QtWidgets.QMessageBox.warning(
-                self, "Colonnes manquantes",
-                "Associe une colonne pour : " + ", ".join(missing))
+                self, "Colonnes manquantes", "Associe une colonne pour : " + ", ".join(missing)
+            )
             return
         self.accept()
 

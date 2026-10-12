@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Panneau Outils TI (facon FIJI) : ROI+FFT2D, profil de ligne, regle,
 soustraction temporelle -- sections repliables."""
+
 import math
 
 import numpy as np
@@ -9,6 +10,8 @@ from PySide6.QtCore import Qt
 
 from frameviewer.ui.roi_panel import RoiPanel
 from frameviewer.ui.i18n import set_ui_pair, set_ui_text, ui_text
+from frameviewer.ui.theming import ui_color
+
 
 class LineProfCanvas(QtWidgets.QWidget):
     """Graphique de profil de ligne (QPainter, sans matplotlib)."""
@@ -18,8 +21,7 @@ class LineProfCanvas(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(120)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
-                           QtWidgets.QSizePolicy.Fixed)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         self.profile = None
         self._hover_index = -1
         self.setMouseTracking(True)
@@ -30,14 +32,13 @@ class LineProfCanvas(QtWidgets.QWidget):
         self.update()
 
     def _plot_rect(self):
-        return QtCore.QRectF(45, 10, max(1, self.width() - 57),
-                             max(1, self.height() - 38))
+        return QtCore.QRectF(45, 10, max(1, self.width() - 57), max(1, self.height() - 38))
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor(24, 24, 28))
+        p.fillRect(self.rect(), ui_color(24, 24, 28))
         if self.profile is None or len(self.profile) < 2:
-            p.setPen(QtGui.QColor(90, 90, 100))
+            p.setPen(ui_color(90, 90, 100))
             p.drawText(self.rect(), Qt.AlignCenter, "Tracez une ligne sur l'image")
             return
         plot = self._plot_rect()
@@ -49,19 +50,22 @@ class LineProfCanvas(QtWidgets.QWidget):
         n = len(data)
         sx = lambda i: left + i / (n - 1) * W
         sy = lambda v: top + H - (v - vmin) / (vmax - vmin) * H
-        p.setPen(QtGui.QPen(QtGui.QColor(75, 75, 88), 1))
+        p.setPen(QtGui.QPen(ui_color(75, 75, 88), 1))
         p.drawLine(QtCore.QLineF(left, top, left, top + H))
         p.drawLine(QtCore.QLineF(left, top + H, left + W, top + H))
-        p.setPen(QtGui.QColor(145, 145, 158))
-        p.drawText(QtCore.QRectF(0, top - 6, left - 5, 14),
-                   Qt.AlignRight | Qt.AlignVCenter, f"{vmax:.1f}")
-        p.drawText(QtCore.QRectF(0, top + H - 7, left - 5, 14),
-                   Qt.AlignRight | Qt.AlignVCenter, f"{vmin:.1f}")
+        p.setPen(ui_color(145, 145, 158))
+        p.drawText(
+            QtCore.QRectF(0, top - 6, left - 5, 14), Qt.AlignRight | Qt.AlignVCenter, f"{vmax:.1f}"
+        )
+        p.drawText(
+            QtCore.QRectF(0, top + H - 7, left - 5, 14),
+            Qt.AlignRight | Qt.AlignVCenter,
+            f"{vmin:.1f}",
+        )
         p.drawText(QtCore.QRectF(left, top + H + 3, W, 16), Qt.AlignLeft, "0 px")
-        p.drawText(QtCore.QRectF(left, top + H + 3, W, 16), Qt.AlignRight,
-                   f"{n - 1} px")
+        p.drawText(QtCore.QRectF(left, top + H + 3, W, 16), Qt.AlignRight, f"{n - 1} px")
         if vmin <= 0 <= vmax:
-            p.setPen(QtGui.QPen(QtGui.QColor(60, 60, 75), 1, Qt.DashLine))
+            p.setPen(QtGui.QPen(ui_color(60, 60, 75), 1, Qt.DashLine))
             p.drawLine(QtCore.QLineF(left, sy(0), left + W, sy(0)))
         path = QtGui.QPainterPath()
         path.moveTo(sx(0), sy(data[0]))
@@ -79,8 +83,7 @@ class LineProfCanvas(QtWidgets.QWidget):
             p.setPen(QtGui.QPen(QtGui.QColor(12, 12, 14), 1))
             p.drawEllipse(hp, 4, 4)
             p.setPen(QtGui.QColor(0, 230, 90))
-            p.drawText(QtCore.QRectF(left, 0, W, 16), Qt.AlignCenter,
-                       f"x={i} px   y={data[i]:.3f}")
+            p.drawText(QtCore.QRectF(left, 0, W, 16), Qt.AlignCenter, f"x={i} px   y={data[i]:.3f}")
 
     def mouseMoveEvent(self, event):
         if self.profile is None or len(self.profile) < 2:
@@ -121,12 +124,12 @@ class CollapsibleSection(QtWidgets.QWidget):
         self.header.setChecked(expanded)
         self.header.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
         self.header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.header.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
-                                  QtWidgets.QSizePolicy.Fixed)
+        self.header.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         self.header.setStyleSheet(
             "QToolButton{border:none;background:#26262f;color:#cfd3dc;"
             "padding:5px 6px;font-weight:bold;text-align:left;border-radius:3px;}"
-            "QToolButton:hover{background:#30303c;}")
+            "QToolButton:hover{background:#30303c;}"
+        )
         self.header.clicked.connect(self._toggle)
         self.body = QtWidgets.QWidget()
         self.body_l = QtWidgets.QVBoxLayout(self.body)
@@ -155,11 +158,12 @@ class CollapsibleSection(QtWidgets.QWidget):
 class ToolsPanel(QtWidgets.QWidget):
     """Outils TI (style FIJI) : ROI+FFT2D, profil de ligne, règle, soustraction
     temporelle — chaque outil dans une section repliable (accordéon)."""
-    modeRequested  = QtCore.Signal(str)       # "roi" | "line" | "ruler"
-    tempSubChanged = QtCore.Signal(bool, int) # (enabled, k)
-    profileHovered = QtCore.Signal(int)       # index du profil, -1 hors graphe
-    fft2dRequested = QtCore.Signal()          # FFT 2D spatiale sur la ROI courante
-    roiConvertRequested = QtCore.Signal()     # export ROI (fixe/suivie) sur la séquence
+
+    modeRequested = QtCore.Signal(str)  # "roi" | "line" | "ruler"
+    tempSubChanged = QtCore.Signal(bool, int)  # (enabled, k)
+    profileHovered = QtCore.Signal(int)  # index du profil, -1 hors graphe
+    fft2dRequested = QtCore.Signal()  # FFT 2D spatiale sur la ROI courante
+    roiConvertRequested = QtCore.Signal()  # export ROI (fixe/suivie) sur la séquence
 
     def _tr(self, text):
         return ui_text(self, text)
@@ -180,7 +184,8 @@ class ToolsPanel(QtWidgets.QWidget):
         self.fft2d_btn = QtWidgets.QPushButton("FFT 2D (spectre spatial)")
         self.fft2d_btn.setToolTip(
             "Transformée de Fourier 2D du crop ROI courant.\n"
-            "Affiche le spectre de magnitude (log) — analyse de texture / périodicité.")
+            "Affiche le spectre de magnitude (log) — analyse de texture / périodicité."
+        )
         self.fft2d_btn.clicked.connect(lambda: self.fft2dRequested.emit())
         fft_row.addWidget(self.fft2d_btn)
         self._roi_sec.addLayout(fft_row)
@@ -188,7 +193,8 @@ class ToolsPanel(QtWidgets.QWidget):
         self.fft2d_label.setAlignment(Qt.AlignCenter)
         self.fft2d_label.setMinimumHeight(140)
         self.fft2d_label.setStyleSheet(
-            "background:#161618; border:1px solid #3a3a42; color:#888; font-size:11px;")
+            "background:#161618; border:1px solid #3a3a42; color:#888; font-size:11px;"
+        )
         self._roi_sec.addWidget(self.fft2d_label)
         self.fft2d_info = QtWidgets.QLabel("─")
         self.fft2d_info.setStyleSheet("font-size:11px; color:#bbb;")
@@ -213,8 +219,7 @@ class ToolsPanel(QtWidgets.QWidget):
 
         # ── règle multipoint ──
         self._ruler_sec = CollapsibleSection("Règle — distance / angle", expanded=False)
-        self.ruler_lbl = QtWidgets.QLabel(
-            "Clic = ajouter un point\nClic droit = effacer le tracé")
+        self.ruler_lbl = QtWidgets.QLabel("Clic = ajouter un point\nClic droit = effacer le tracé")
         self.ruler_lbl.setWordWrap(True)
         self.ruler_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.ruler_lbl.setStyleSheet("font-size:11px; color:#bbb;")
@@ -222,8 +227,7 @@ class ToolsPanel(QtWidgets.QWidget):
         lay.addWidget(self._ruler_sec)
 
         # accordéon : ouvrir une section = sélectionner l'outil correspondant
-        self._tool_secs = {"roi": self._roi_sec, "line": self._line_sec,
-                           "ruler": self._ruler_sec}
+        self._tool_secs = {"roi": self._roi_sec, "line": self._line_sec, "ruler": self._ruler_sec}
         for mode, sec in self._tool_secs.items():
             sec.header.clicked.connect(lambda _=False, m=mode: self._set_tool(m))
 
@@ -235,11 +239,13 @@ class ToolsPanel(QtWidgets.QWidget):
         row_k = QtWidgets.QHBoxLayout()
         row_k.addWidget(QtWidgets.QLabel("k ="))
         self.sub_spin = QtWidgets.QSpinBox()
-        self.sub_spin.setRange(1, 9999); self.sub_spin.setValue(1)
+        self.sub_spin.setRange(1, 9999)
+        self.sub_spin.setValue(1)
         self.sub_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.sub_spin.setKeyboardTracking(False)
         self.sub_spin.setFocusPolicy(Qt.StrongFocus)
         self.sub_spin.valueChanged.connect(self._emit_sub)
+
         def _step_button(text, tip):
             button = QtWidgets.QToolButton()
             button.setText(text)
@@ -251,8 +257,10 @@ class ToolsPanel(QtWidgets.QWidget):
                 "QToolButton{background:#26262e;color:#ddd;border:1px solid #444;"
                 "border-radius:3px;font-size:13px;font-weight:bold;}"
                 "QToolButton:hover{border-color:#5aafff;color:#fff;}"
-                "QToolButton:pressed{background:#333340;}")
+                "QToolButton:pressed{background:#333340;}"
+            )
             return button
+
         sub_minus = _step_button("−", "Diminuer l'écart temporel")
         sub_plus = _step_button("+", "Augmenter l'écart temporel")
         sub_minus.clicked.connect(self.sub_spin.stepDown)
@@ -290,7 +298,8 @@ class ToolsPanel(QtWidgets.QWidget):
             set_ui_pair(
                 self.prof_stats,
                 f"N={len(profile)} px   min={mn:.1f}   max={mx:.1f}   moy={av:.2f}",
-                f"N={len(profile)} px   min={mn:.1f}   max={mx:.1f}   mean={av:.2f}")
+                f"N={len(profile)} px   min={mn:.1f}   max={mx:.1f}   mean={av:.2f}",
+            )
             self.prof_csv_btn.setEnabled(True)
         else:
             self.prof_stats.setText("─")
@@ -299,25 +308,26 @@ class ToolsPanel(QtWidgets.QWidget):
     def update_ruler_pts(self, pts):
         """Met à jour l'affichage de la règle multipoint."""
         if not pts:
-            set_ui_text(
-                self.ruler_lbl,
-                "Clic = ajouter un point\nClic droit = effacer le tracé")
+            set_ui_text(self.ruler_lbl, "Clic = ajouter un point\nClic droit = effacer le tracé")
             return
-        lines = [f"P{i+1} = ({x}, {y})" for i, (x, y) in enumerate(pts)]
+        lines = [f"P{i + 1} = ({x}, {y})" for i, (x, y) in enumerate(pts)]
         if len(pts) >= 2:
-            total = sum(math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1])
-                        for i in range(1, len(pts)))
+            total = sum(
+                math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
+                for i in range(1, len(pts))
+            )
             french_total = f"Périmètre en cours : {total:.2f} px"
             english_total = f"Current perimeter: {total:.2f} px"
             lines.append((french_total, english_total))
-            x1, y1 = pts[-2]; x2, y2 = pts[-1]
+            x1, y1 = pts[-2]
+            x2, y2 = pts[-1]
             angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
-            lines.append((f"Angle dernier segment : {angle:.2f}°",
-                          f"Last segment angle: {angle:.2f}°"))
+            lines.append(
+                (f"Angle dernier segment : {angle:.2f}°", f"Last segment angle: {angle:.2f}°")
+            )
         french_lines = [line[0] if isinstance(line, tuple) else line for line in lines]
         english_lines = [line[1] if isinstance(line, tuple) else line for line in lines]
-        set_ui_pair(
-            self.ruler_lbl, "\n".join(french_lines), "\n".join(english_lines))
+        set_ui_pair(self.ruler_lbl, "\n".join(french_lines), "\n".join(english_lines))
 
     def update_ruler(self, x1, y1, x2, y2):
         self.update_ruler_pts([(x1, y1), (x2, y2)])
@@ -329,16 +339,15 @@ class ToolsPanel(QtWidgets.QWidget):
             set_ui_text(self.fft2d_info, info or "─")
         else:
             self.fft2d_label.setPixmap(QtGui.QPixmap())
-            set_ui_text(
-                self.fft2d_label,
-                info or "Spectre FFT 2D : tracer une ROI puis cliquer.")
+            set_ui_text(self.fft2d_label, info or "Spectre FFT 2D : tracer une ROI puis cliquer.")
             self.fft2d_info.setText("─")
 
     def _export_csv(self):
         if self._profile is None:
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, ui_text(self, "Exporter profil CSV"), "profil_ligne.csv", "CSV (*.csv)")
+            self, ui_text(self, "Exporter profil CSV"), "profil_ligne.csv", "CSV (*.csv)"
+        )
         if not path:
             return
         try:
@@ -360,26 +369,29 @@ class FftCanvas(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(110)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
-                           QtWidgets.QSizePolicy.Fixed)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         self.freqs = None
         self.psd = None
         self.peak_freq = None
 
     def set_spectrum(self, freqs, psd):
         self.freqs = np.asarray(freqs, dtype=np.float64) if freqs is not None else None
-        self.psd   = np.asarray(psd,   dtype=np.float64) if psd   is not None else None
-        self.peak_freq = float(self.freqs[int(np.argmax(self.psd))]) \
-            if (self.freqs is not None and self.psd is not None and len(self.psd)) else None
+        self.psd = np.asarray(psd, dtype=np.float64) if psd is not None else None
+        self.peak_freq = (
+            float(self.freqs[int(np.argmax(self.psd))])
+            if (self.freqs is not None and self.psd is not None and len(self.psd))
+            else None
+        )
         self.update()
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor(24, 24, 28))
+        p.fillRect(self.rect(), ui_color(24, 24, 28))
         if self.freqs is None or self.psd is None or len(self.psd) < 2:
-            p.setPen(QtGui.QColor(90, 90, 100))
-            p.drawText(self.rect(), Qt.AlignCenter,
-                       "Sélectionner une ROI puis cliquer sur Analyser FFT")
+            p.setPen(ui_color(90, 90, 100))
+            p.drawText(
+                self.rect(), Qt.AlignCenter, "Sélectionner une ROI puis cliquer sur Analyser FFT"
+            )
             return
         m, W, H = 8, self.width() - 16, self.height() - 30
         freqs, psd = self.freqs, self.psd
@@ -411,13 +423,10 @@ class FftCanvas(QtWidgets.QWidget):
         p.setBrush(Qt.NoBrush)
         p.drawPath(outline)
         # labels
-        p.setPen(QtGui.QColor(130, 130, 145))
+        p.setPen(ui_color(130, 130, 145))
         base = m + H + 4
-        p.drawText(QtCore.QRectF(m, base, W, 14), Qt.AlignLeft,
-                   f"{freqs[0]:.2f} Hz")
-        p.drawText(QtCore.QRectF(m, base, W, 14), Qt.AlignRight,
-                   f"{freqs[-1]:.2f} Hz")
+        p.drawText(QtCore.QRectF(m, base, W, 14), Qt.AlignLeft, f"{freqs[0]:.2f} Hz")
+        p.drawText(QtCore.QRectF(m, base, W, 14), Qt.AlignRight, f"{freqs[-1]:.2f} Hz")
         if self.peak_freq is not None:
             p.setPen(QtGui.QColor(255, 200, 50))
-            p.drawText(QtCore.QRectF(m, m, W, 14), Qt.AlignCenter,
-                       f"Pic : {self.peak_freq:.4f} Hz")
+            p.drawText(QtCore.QRectF(m, m, W, 14), Qt.AlignCenter, f"Pic : {self.peak_freq:.4f} Hz")

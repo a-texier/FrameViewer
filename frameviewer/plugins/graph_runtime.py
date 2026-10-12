@@ -5,6 +5,7 @@ A graph package uses the same loader and hooks as a code plugin, while its
 logic lives in ``graph.json``. The editor generates a small ``plugin.py``
 wrapper around ``GraphPlugin``.
 """
+
 import json
 import os
 
@@ -33,7 +34,7 @@ class GraphPlugin(FrameViewerPlugin):
         rows = api.read_csv_dict(path)
         frame_col = self._graph.frame_column if self._graph else None
         if not frame_col and rows:
-            frame_col = next(iter(rows[0]))   # Fall back to the first CSV column.
+            frame_col = next(iter(rows[0]))  # Fall back to the first CSV column.
         by_frame = {}
         for row in rows:
             try:

@@ -6,6 +6,7 @@ are optional and loader-side error isolation disables a failing plugin without
 terminating the application. Plugins must use this facade rather than importing
 UI internals. See ``docs/plugins.md`` for the complete contract.
 """
+
 import csv
 import json
 import os
@@ -15,6 +16,7 @@ def _env_version_hint(paths):
     """Warn when an external site-packages directory targets another Python."""
     import subprocess
     import sys
+
     app_ver = "%d.%d" % sys.version_info[:2]
     for sp in paths or []:
         # Resolve the environment interpreter from its site-packages path.
@@ -25,15 +27,20 @@ def _env_version_hint(paths):
         try:
             r = subprocess.run(
                 [pyexe, "-c", "import sys;print('%d.%d'%sys.version_info[:2])"],
-                capture_output=True, text=True, timeout=10)
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
             env_ver = (r.stdout or "").strip()
         except Exception:
             continue
         if env_ver and env_ver != app_ver:
-            return (f"cet env est en Python {env_ver}, l'app tourne en Python "
-                    f"{app_ver} : une lib compilee (pandas/numpy/polars) NE peut "
-                    f"PAS se charger en meme-process. Utilise run_external (le "
-                    f"python.exe de cet env), ou un env en Python {app_ver}.")
+            return (
+                f"cet env est en Python {env_ver}, l'app tourne en Python "
+                f"{app_ver} : une lib compilee (pandas/numpy/polars) NE peut "
+                f"PAS se charger en meme-process. Utilise run_external (le "
+                f"python.exe de cet env), ou un env en Python {app_ver}."
+            )
     return None
 
 
@@ -250,8 +257,7 @@ class PluginAPI:
         state = getattr(self._mw, "_plugin_state", {}).get(pid, {})
         return bool(state.get("elements", {}).get(key, default))
 
-    def map_csv_columns(self, csv_path, roles, optional_roles=None,
-                        remember_key=None, title=None):
+    def map_csv_columns(self, csv_path, roles, optional_roles=None, remember_key=None, title=None):
         """Ask the user to map semantic roles to actual CSV columns.
 
         Optional mappings may remain empty. A remember key stores the mapping
@@ -280,10 +286,15 @@ class PluginAPI:
                 pass
 
         from frameviewer.ui.csv_mapper_dialog import CsvColumnMapperDialog
+
         dlg = CsvColumnMapperDialog(
-            self._mw, header, roles, sample_rows=sample_rows,
+            self._mw,
+            header,
+            roles,
+            sample_rows=sample_rows,
             optional_roles=optional_roles or [],
-            title=title or "Associer les colonnes du CSV")
+            title=title or "Associer les colonnes du CSV",
+        )
         if not dlg.exec():
             return None
         mapping = dlg.result_mapping()
@@ -299,6 +310,7 @@ class PluginAPI:
     def add_dock(self, widget, title, area="right"):
         """Add a plugin-owned dock and tabify it with existing plugin docks."""
         from PySide6 import QtCore, QtWidgets
+
         areas = {
             "left": QtCore.Qt.LeftDockWidgetArea,
             "right": QtCore.Qt.RightDockWidgetArea,
@@ -312,6 +324,7 @@ class PluginAPI:
         dock.setWidget(widget)
         dock.setMinimumWidth(220)
         from frameviewer.ui import icons as _icons
+
         _icons.restyle_dock_titlebar_buttons(dock)
         last = getattr(self._mw, "_plugin_last_dock", None)
         if last is not None:
@@ -337,6 +350,7 @@ class PluginAPI:
         """Write a structured message to the plugin console."""
         import os
         import sys
+
         lineno = src = None
         try:
             f = sys._getframe(1)
@@ -344,8 +358,9 @@ class PluginAPI:
             src = os.path.basename(f.f_code.co_filename)
         except Exception:
             pass
-        self._mw._plugin_loader.log(str(msg), level=level, pid=self._plugin_id,
-                                    lineno=lineno, src=src)
+        self._mw._plugin_loader.log(
+            str(msg), level=level, pid=self._plugin_id, lineno=lineno, src=src
+        )
 
     def request_repaint(self):
         """Request a repaint of the active view."""
@@ -357,6 +372,7 @@ class PluginAPI:
         """Append an external site-packages path without shadowing bundled modules."""
         import os
         import sys
+
         if path and os.path.isdir(path) and path not in sys.path:
             sys.path.append(path)
 
@@ -368,6 +384,7 @@ class PluginAPI:
         Source environments with an importable dependency need no path.
         """
         import os
+
         return os.environ.get("FV_EXTERNAL_LIBS", "")
 
     def external_import(self, module, site_packages=None):
@@ -379,6 +396,7 @@ class PluginAPI:
         ``run_external`` when process isolation is required.
         """
         import importlib
+
         paths = []
         if site_packages:
             paths = [site_packages] if isinstance(site_packages, str) else list(site_packages)
@@ -395,13 +413,27 @@ class PluginAPI:
     def env_report(self):
         """Return executable, frozen-state, and loaded-module diagnostics."""
         from frameviewer.plugins.loader import environment_report
+
         return environment_report()
 
     def run_external(self, python_exe, code, timeout=30):
         """Execute code in an isolated Python interpreter and return stdout."""
         import subprocess
-        r = subprocess.run([python_exe, "-c", code], capture_output=True,
-                           text=True, timeout=timeout)
+
+        # UTF-8 both ways (the locale codepage would choke on accents), and no
+        # console window flashing from the windowed executable.
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        r = subprocess.run(
+            [python_exe, "-c", code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=env,
+            creationflags=flags,
+        )
         if r.returncode != 0:
             raise RuntimeError(r.stderr.strip() or "subprocess a echoue")
         return r.stdout

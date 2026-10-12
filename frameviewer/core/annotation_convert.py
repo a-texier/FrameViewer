@@ -7,10 +7,11 @@ Converting from YOLO therefore cannot reconstruct real temporal identity.
 
 This module has no PySide6 dependency and is reusable from workers or scripts.
 """
+
 import os
 import random
 
-from frameviewer.core.annotation_loader import load_annotations
+from frameviewer.core.annotation_loader import load_annotations, pair_stems_to_positions
 from frameviewer.core.io_utils import imwrite_unicode
 
 
@@ -46,14 +47,24 @@ def split_frame_ids(frame_ids, ratios=(1.0, 0.0, 0.0), seed=0):
     n_train = min(n_train, n)
     n_val = min(n_val, n - n_train)
     train = shuffled[:n_train]
-    val = shuffled[n_train:n_train + n_val]
-    test = shuffled[n_train + n_val:]
+    val = shuffled[n_train : n_train + n_val]
+    test = shuffled[n_train + n_val :]
     return {"train": sorted(train), "val": sorted(val), "test": sorted(test)}
 
 
-def export_yolo(annotations, frame_ids, img_w, img_h, out_dir,
-                 class_names=None, ratios=(1.0, 0.0, 0.0), seed=0,
-                 include_empty=True, frame_provider=None, progress_cb=None):
+def export_yolo(
+    annotations,
+    frame_ids,
+    img_w,
+    img_h,
+    out_dir,
+    class_names=None,
+    ratios=(1.0, 0.0, 0.0),
+    seed=0,
+    include_empty=True,
+    frame_provider=None,
+    progress_cb=None,
+):
     """Write a YOLO dataset from annotations already loaded in memory.
 
     Output layout:
@@ -116,8 +127,11 @@ def export_yolo(annotations, frame_ids, img_w, img_h, out_dir,
     yaml_lines = [f"path: {out_dir}"]
     for split_name in ("train", "val", "test"):
         if counts.get(split_name):
-            yaml_lines.append(f"{split_name}: images/{split_name}" if any_images
-                               else f"{split_name}: labels/{split_name}")
+            yaml_lines.append(
+                f"{split_name}: images/{split_name}"
+                if any_images
+                else f"{split_name}: labels/{split_name}"
+            )
     yaml_lines.append(f"nc: {len(class_names)}")
     yaml_lines.append("names: [" + ", ".join(f"'{c}'" for c in class_names) + "]")
     with open(os.path.join(out_dir, "data.yaml"), "w", encoding="utf-8") as f:
@@ -140,20 +154,31 @@ def yolo_to_ver_lines(annotations, frame_ids=None, class_names=None):
             cls = int(det[0]) if len(det) > 0 else 0
             x1, y1, x2, y2 = det[1], det[2], det[3], det[4]
             cls_name = class_names[cls] if 0 <= cls < len(class_names) else "unknown"
-            parts = [f"{idx + 1:.6e}", "1.000000e+00",
-                     f"{x1:.6e}", f"{y1:.6e}", f"{x2:.6e}", f"{y2:.6e}",
-                     f"{pos:.6e}", cls_name]
+            parts = [
+                f"{idx + 1:.6e}",
+                "1.000000e+00",
+                f"{x1:.6e}",
+                f"{y1:.6e}",
+                f"{x2:.6e}",
+                f"{y2:.6e}",
+                f"{pos:.6e}",
+                cls_name,
+            ]
             lines.append("\t".join(parts))
     return lines
 
 
-def yolo_to_ver(yolo_path, out_ver_path, img_w, img_h, class_names=None):
+def yolo_to_ver(yolo_path, out_ver_path, img_w, img_h, class_names=None, image_stems=None):
     """Convert a YOLO path to one merged tracked-box file.
 
     Return ``(box_count, frame_count)``. See ``yolo_to_ver_lines`` for the
-    positional identifier limitation.
+    positional identifier limitation. A YOLO folder is keyed by label stem:
+    ``image_stems`` (names of the target image sequence) places each label on
+    its frame, otherwise labels follow natural order.
     """
     annots = load_annotations(yolo_path, img_w, img_h)
+    if any(not isinstance(key, int) for key in annots):
+        annots, _named = pair_stems_to_positions(annots, image_stems)
     lines = yolo_to_ver_lines(annots, class_names=class_names)
     with open(out_ver_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

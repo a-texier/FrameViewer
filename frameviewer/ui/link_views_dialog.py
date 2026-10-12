@@ -30,13 +30,15 @@ class LinkViewsDialog(QtWidgets.QDialog):
         if mode == "temporal":
             info = QtWidgets.QLabel(
                 "Le mode Temporel utilise deja N pour definir l'ecart entre i-N et i.\n"
-                "La liaison synchronise ici uniquement le zoom et le deplacement.")
+                "La liaison synchronise ici uniquement le zoom et le deplacement."
+            )
             info.setWordWrap(True)
             layout.addWidget(info)
         else:
             info = QtWidgets.QLabel(
                 "Chaque valeur est la frame de depart du slot. Ensuite, la navigation\n"
-                "conserve exactement ces ecarts entre les vues.")
+                "conserve exactement ces ecarts entre les vues."
+            )
             info.setWordWrap(True)
             layout.addWidget(info)
             _rows, cols, labels = _LAYOUTS.get(mode, (1, len(sources), tuple()))
@@ -47,7 +49,8 @@ class LinkViewsDialog(QtWidgets.QDialog):
                 cell.setObjectName("linkFrameCell")
                 cell.setStyleSheet(
                     "QFrame#linkFrameCell{border:1px solid #555;background:#202027;"
-                    "border-radius:4px;padding:5px;}")
+                    "border-radius:4px;padding:5px;}"
+                )
                 form = QtWidgets.QVBoxLayout(cell)
                 form.setContentsMargins(7, 6, 7, 6)
                 label = labels[index] if index < len(labels) else f"Vue {index + 1}"
@@ -80,7 +83,8 @@ class LinkViewsDialog(QtWidgets.QDialog):
         reset.setObjectName("link_reset")
         reset.clicked.connect(self._reset)
         buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Apply | QtWidgets.QDialogButtonBox.Cancel)
+            QtWidgets.QDialogButtonBox.Apply | QtWidgets.QDialogButtonBox.Cancel
+        )
         apply_button = buttons.button(QtWidgets.QDialogButtonBox.Apply)
         apply_button.setText("Appliquer")
         apply_button.setObjectName("link_apply")

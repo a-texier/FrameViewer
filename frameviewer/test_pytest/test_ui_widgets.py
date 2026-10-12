@@ -150,10 +150,17 @@ def test_multiview_screen_text_accepts_fractional_view_rect(qapp):
     canvas.resize(320, 200)
     overlay = MultiViewOverlay(canvas)
     overlay.resize(canvas.size())
-    overlay.set_specs([{
-        "type": "texte_ecran", "view": 0, "label": "60 keypoints apparies",
-        "color": (255, 255, 255), "background": (20, 20, 25, 205),
-    }])
+    overlay.set_specs(
+        [
+            {
+                "type": "texte_ecran",
+                "view": 0,
+                "label": "60 keypoints apparies",
+                "color": (255, 255, 255),
+                "background": (20, 20, 25, 205),
+            }
+        ]
+    )
     canvas.show()
     overlay.show()
     qapp.processEvents()

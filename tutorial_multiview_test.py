@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Focused offscreen regression tests for tutorial data and linked views."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -83,8 +84,8 @@ def test_link_dialogs(app) -> None:
         option = QtWidgets.QStyleOptionSpinBox()
         spin.initStyleOption(option)
         up_rect = spin.style().subControlRect(
-            QtWidgets.QStyle.CC_SpinBox, option,
-            QtWidgets.QStyle.SC_SpinBoxUp, spin)
+            QtWidgets.QStyle.CC_SpinBox, option, QtWidgets.QStyle.SC_SpinBoxUp, spin
+        )
         clicked_before = spin.value()
         QtTest.QTest.mouseClick(spin, Qt.LeftButton, pos=up_rect.center())
         assert spin.value() == clicked_before + 1
@@ -122,9 +123,16 @@ def test_link_dialogs(app) -> None:
 
 def _load_satellite(window, widget, paths, name):
     source = ImageSequenceSource(paths, label=name, directory=str(Path(paths[0]).parent))
-    widget.load(source, window.hist.lo, window.hist.hi, window.lut_combo.currentData(),
-                window._cube_lut, window._cube_size, window.hist.full_range,
-                window._filter_flags())
+    widget.load(
+        source,
+        window.hist.lo,
+        window.hist.hi,
+        window.lut_combo.currentData(),
+        window._cube_lut,
+        window._cube_size,
+        window.hist.full_range,
+        window._filter_flags(),
+    )
 
 
 def _drop_path(widget, path: Path) -> None:
@@ -157,7 +165,9 @@ def test_linked_navigation_and_plugin_api(app) -> None:
     app.processEvents()
 
     # 20 logical frames let the public [10, 0] example be exercised exactly.
-    window.set_source(ImageSequenceSource(rgb * 2, label="RGB20", directory=str(DATA / "traffic_rgb")))
+    window.set_source(
+        ImageSequenceSource(rgb * 2, label="RGB20", directory=str(DATA / "traffic_rgb"))
+    )
     by_stem = load_annotations(DATA / "annotations_yolo", 1920, 1080)
     mapped = window._pair_yolo_by_name(by_stem)
     assert sorted(mapped) == list(range(10))
@@ -188,7 +198,9 @@ def test_linked_navigation_and_plugin_api(app) -> None:
     for index, widget, primary in window._split_canvas.ordered_views():
         if not primary:
             _load_satellite(window, widget, thermal * 3, f"IR30-{index}")
-    window.set_source(ImageSequenceSource(rgb * 3, label="RGB30", directory=str(DATA / "traffic_rgb")))
+    window.set_source(
+        ImageSequenceSource(rgb * 3, label="RGB30", directory=str(DATA / "traffic_rgb"))
+    )
     window._link_start_frames_by_mode["q4"] = [17, 8, 0, 0]
     window._link_start_frames = [17, 8, 0, 0]
     window._set_link_enabled(True, reset_base=True)
@@ -270,8 +282,11 @@ def test_plugins() -> None:
     assert colormap is not None and colormap.isChecked()
     scope = panel.findChild(QtWidgets.QComboBox, "multiview_score_scope")
     assert scope is not None and scope.count() == 2
-    assert panel.findChild(QtWidgets.QLabel, "multiview_csv_status").text().endswith(
-        "600 lignes au total")
+    assert (
+        panel.findChild(QtWidgets.QLabel, "multiview_csv_status")
+        .text()
+        .endswith("600 lignes au total")
+    )
     assert panel.findChild(QtWidgets.QLabel, "multiview_match_count") is not None
     assert plugin._score_color(0.0)[0] > plugin._score_color(0.0)[2]
     assert plugin._score_color(1.0)[2] > plugin._score_color(1.0)[0]
@@ -387,9 +402,7 @@ def test_tutorial_action_path(app) -> None:
     app.processEvents()
     tutorial = window._tutorial
     tutorial.start()
-    by_title = {
-        step.title: index for index, step in enumerate(tutorial.steps)
-    }
+    by_title = {step.title: index for index, step in enumerate(tutorial.steps)}
 
     def enter(title):
         tutorial.index = by_title[title]

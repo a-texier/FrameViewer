@@ -35,8 +35,7 @@ def _images(folder: Path, count=4, shape=(24, 32)) -> list[str]:
 
 @pytest.mark.parametrize(
     ("fmt", "factor"),
-    [("gray8", 1.0), ("gray16le", 2.0), ("i420", 1.5), ("nv12", 1.5),
-     ("yuyv", 2.0), ("uyvy", 2.0)],
+    [("gray8", 1.0), ("gray16le", 2.0), ("i420", 1.5), ("nv12", 1.5), ("yuyv", 2.0), ("uyvy", 2.0)],
 )
 def test_raw_frame_byte_sizes(fmt, factor):
     assert yuv_frame_bytes(8, 6, fmt) == int(8 * 6 * factor)
@@ -97,8 +96,17 @@ def test_fusion_source_count_resize_and_blend(tmp_path):
     left = ImageSequenceSource(_images(tmp_path / "left", count=3, shape=(20, 30)))
     right = ImageSequenceSource(_images(tmp_path / "right", count=2, shape=(10, 15)))
     fusion = FusionSource(
-        left, (0, 255), right, (0, 255), None, None, 0,
-        (0, 255), {}, 0.5, "alpha",
+        left,
+        (0, 255),
+        right,
+        (0, 255),
+        None,
+        None,
+        0,
+        (0, 255),
+        {},
+        0.5,
+        "alpha",
     )
     assert fusion.count == 2
     assert fusion.get(1).shape == (20, 30, 3)
@@ -147,8 +155,19 @@ def test_conversion_worker_writes_all_image_frames(qapp, tmp_path, mode):
     paths = _images(tmp_path / "input", count=3)
     output = tmp_path / mode
     worker = ConvertWorker(
-        "images", paths, str(output), mode, 0, 255, None, None, 0,
-        1, (0, 255), filters={}, fps=12.0,
+        "images",
+        paths,
+        str(output),
+        mode,
+        0,
+        255,
+        None,
+        None,
+        0,
+        1,
+        (0, 255),
+        filters={},
+        fps=12.0,
     )
     done = QtTest.QSignalSpy(worker.finished_ok)
     failed = QtTest.QSignalSpy(worker.failed)
@@ -165,8 +184,18 @@ def test_conversion_worker_writes_all_image_frames(qapp, tmp_path, mode):
 
 def test_conversion_worker_reports_unknown_source(qapp, tmp_path):
     worker = ConvertWorker(
-        "unknown", [], str(tmp_path / "out"), "png8", 0, 255, None,
-        None, 0, 1, (0, 255), filters={},
+        "unknown",
+        [],
+        str(tmp_path / "out"),
+        "png8",
+        0,
+        255,
+        None,
+        None,
+        0,
+        1,
+        (0, 255),
+        filters={},
     )
     failed = QtTest.QSignalSpy(worker.failed)
     worker.start()
@@ -189,9 +218,20 @@ def test_conversion_worker_signed_temporal_difference_16bit(qapp, tmp_path):
         paths.append(str(path))
     output = tmp_path / "diff8"
     worker = ConvertWorker(
-        "images", paths, str(output), "png8", -10000, 10000,
-        "coolwarm_r_black", None, 0, 1, (-10000, 10000),
-        filters={}, fps=12.0, temporal_sub_k=1,
+        "images",
+        paths,
+        str(output),
+        "png8",
+        -10000,
+        10000,
+        "coolwarm_r_black",
+        None,
+        0,
+        1,
+        (-10000, 10000),
+        filters={},
+        fps=12.0,
+        temporal_sub_k=1,
     )
     failed = QtTest.QSignalSpy(worker.failed)
     worker.start()

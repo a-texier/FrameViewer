@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """Liste des sources ouvertes cette session (historique), avec badge
 type/bit-depth + pastille gris/couleur, et glisser vers un bloc du split."""
+
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
+from frameviewer.ui.theming import ui_color
+
 
 class _ColorModeBadge(QtWidgets.QWidget):
     """Pastille arrondie, tout à droite d'une ligne d'historique : dégradé
@@ -28,7 +31,7 @@ class _ColorModeBadge(QtWidgets.QWidget):
         else:
             grad.setColorAt(0.0, QtGui.QColor(28, 28, 30))
             grad.setColorAt(1.0, QtGui.QColor(228, 228, 230))
-        p.setPen(QtGui.QPen(QtGui.QColor(90, 90, 100), 1))
+        p.setPen(QtGui.QPen(ui_color(90, 90, 100), 1))
         p.setBrush(grad)
         p.drawRoundedRect(rect, 3, 3)
 
@@ -52,7 +55,7 @@ class HistoryList(QtWidgets.QListWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.path_resolver = None   # callable(row) -> chemin déposable ou None
+        self.path_resolver = None  # callable(row) -> chemin déposable ou None
         self.setDragEnabled(True)
         self.setDragDropMode(QtWidgets.QAbstractItemView.DragOnly)
 

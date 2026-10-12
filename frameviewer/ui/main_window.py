@@ -2,6 +2,7 @@
 """Fenetre principale : barre d'outils, docks, navigation, dispatch
 d'ouverture. Le gros morceau (~3600 lignes) -- volontairement pas eclate en
 sous-classes (voir docs/architecture.md), seulement deplace tel quel."""
+
 import os
 import time as _time
 
@@ -12,14 +13,18 @@ from PySide6.QtCore import Qt, QUrl
 
 try:
     from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
     _HAS_AUDIO = True
 except ImportError:
     _HAS_AUDIO = False
 
 try:
-    from frameviewer.core.annotation_loader import (is_annotation_path,
-                                                     load_annotations as _load_annotations,
-                                                     scan_dropped_folder)
+    from frameviewer.core.annotation_loader import (
+        is_annotation_path,
+        load_annotations as _load_annotations,
+        scan_dropped_folder,
+    )
+
     _HAS_ANNOT = True
 except ImportError:
     _HAS_ANNOT = False
@@ -27,55 +32,90 @@ except ImportError:
     is_annotation_path = None
     scan_dropped_folder = None
 
-from frameviewer.core.annotations import (_ann_color, _rotate_box_coords,
-                                          bake_sidecar_overlays, draw_annotation_boxes)
-from frameviewer.core.constants import (COLORMAPS, FRENCH_COLORS, IMAGE_EXTS,
-                                        SIGNED_DIFF_LUT, VIDEO_EXTS)
-from frameviewer.core.feature_registry import (extensions_for_kind,
-                                                operation_for_kind,
-                                                supports_path)
+from frameviewer import __version__
+from frameviewer.core.annotations import (
+    _ann_color,
+    _rotate_box_coords,
+    bake_sidecar_overlays,
+    draw_annotation_boxes,
+)
+from frameviewer.core.constants import COLORMAPS, IMAGE_EXTS, SIGNED_DIFF_LUT, VIDEO_EXTS
+from frameviewer.core.export_formats import Mp4Writer
+from frameviewer.core.feature_registry import extensions_for_kind, operation_for_kind, supports_path
 from frameviewer.core.io_utils import fmt_time, list_files, list_images, natural_sort
-from frameviewer.core.pipeline import (auto_window_sigma, blend_frames, load_cube,
-                                       render_frame, to_intensity)
+from frameviewer.core.pipeline import (
+    auto_window_sigma,
+    blend_frames,
+    finite_range,
+    render_frame,
+    to_intensity,
+)
 from frameviewer.core.plugin_render import alpha_over, composite_patches
-from frameviewer.core.sources import (FusionSource, ImageSequenceSource, SpecializedSource,
-                                      VideoSource, YuvSource, describe_source)
+from frameviewer.core.sources import (
+    FusionSource,
+    ImageSequenceSource,
+    SpecializedSource,
+    VideoSource,
+    YuvSource,
+    frame_info,
+)
 from frameviewer.ui import icons
 from frameviewer.ui.color_bar import ColorBar
-from frameviewer.ui.export_dialogs import (ClipExtractDialog, ConvertDialog,
-                                           RoiConvertDialog, SplitExtractDialog)
+from frameviewer.ui.export_dialogs import (
+    ClipExtractDialog,
+    Mp4OptionsDialog,
+    RoiConvertDialog,
+    SplitExtractDialog,
+)
+from frameviewer.ui.export_jobs import ExportSnapshot, JobRunner
 from frameviewer.ui.history_list import HistoryList, _HistRow
 from frameviewer.ui.histogram import HistogramLUT
-from frameviewer.ui.i18n import (LANGUAGE_SETTING, LocalizedStatusBar,
-                                 UiTranslationController, normalize_language,
-                                 set_ui_text, set_ui_tooltip, translate_text)
+from frameviewer.ui.i18n import (
+    LANGUAGE_SETTING,
+    LocalizedStatusBar,
+    UiTranslationController,
+    normalize_language,
+    set_ui_text,
+    set_ui_tooltip,
+    translate_text,
+)
 from frameviewer.ui.layer_export_dialog import LayerExportDialog
 from frameviewer.ui.link_views_dialog import LinkViewsDialog
 from frameviewer.ui.yolo_convert_dialog import YoloConvertDialog
-from frameviewer.ui.multiview import (BaseViewFrame, FrameSlider, PrimaryFrame,
-                                      SatelliteView, SplitCanvas)
+from frameviewer.ui.multiview import BaseViewFrame, FrameSlider, PrimaryFrame, SplitCanvas
+from frameviewer.ui.shortcuts import (
+    NAV_ACTIONS,
+    SHORTCUT_ACTIONS,
+    ShortcutsDialog,
+    event_matches,
+    install_global_shortcuts,
+    keys_label,
+    load_shortcuts,
+    save_shortcuts,
+)
 from frameviewer.ui.theme import _APP_LOGO_B64
+from frameviewer.ui.theming import apply_theme, themed_html
 from frameviewer.ui.tools_panel import ToolsPanel
-from frameviewer.ui.video_widget import VideoWidget
+from frameviewer.ui.video_widget import VideoWidget, probe_text
 from frameviewer.plugins.loader import PluginLoader
 from frameviewer.workers.annot_load_worker import AnnotFolderLoadWorker
+from frameviewer.workers.prefetch_thread import _PrefetchThread
 
 
 _EPHEMERAL_DEMO_PLUGIN_IDS = {"demo_showcase", "demo_2_multivue_kpts"}
-from frameviewer.workers.convert_worker import ConvertWorker
 
-SpecializedWriter = operation_for_kind("sequence_format", "writer")
 parse_overlay_sidecar = operation_for_kind("overlay_format", "read")
 find_sequence_for_sidecar = operation_for_kind("overlay_format", "find_media")
 SEQUENCE_FORMAT_EXTS = extensions_for_kind("sequence_format")
 OVERLAY_FORMAT_EXTS = extensions_for_kind("overlay_format")
-from frameviewer.workers.prefetch_thread import _PrefetchThread
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("FrameViewer - OpenCV")
+        self.setWindowTitle(f"FrameViewer {__version__}")
         import base64 as _b64
+
         _pm = QtGui.QPixmap()
         _pm.loadFromData(_b64.b64decode(_APP_LOGO_B64))
         self.setWindowIcon(QtGui.QIcon(_pm))
@@ -102,18 +142,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.source = None
         self.cur = 0
         self._raw = None
-        self.clicks = []           # (frame, x, y)
+        self.clicks = []  # (frame, x, y)
         self.clicks_path = None
         self._cube_lut = None
         self._cube_size = 0
         self._slider_user = False
         self._was_playing = False
-        self.overlays = {}         # {num: [graphique...]}
-        self._pending = None       # overlays en attente de sequence
-        self._conv_workers = {}    # conv_id -> {'worker', 'item', 'label'}
-        self._conv_id_seq = 0
-        self._history = []         # [(display_label, src_kind, src_arg, bit_label, is_color), ...]
-        self._frame_buf = ""       # saisie clavier en cours d'un numero de frame
+        self.overlays = {}  # {num: [graphique...]}
+        self._pending = None  # overlays en attente de sequence
+        self._history = []  # [(display_label, src_kind, src_arg, bit_label, is_color), ...]
+        self._frame_buf = ""  # saisie clavier en cours d'un numero de frame
         # --- resolution de fetch (optim reseau) ---
         self._fetch_scale = 1.0
         # --- rotation / crop dynamique / F11 ---
@@ -121,33 +159,42 @@ class MainWindow(QtWidgets.QMainWindow):
         self._dyn_crop = False
         self._annotations = {}  # frame_idx -> [(cls,x1,y1,x2,y2,track_id)]
         self._annot_path = ""
-        self._annot_track_next = 0   # prochain track_id (calques .ver multiples)
+        self._annot_track_next = 0  # prochain track_id (calques .ver multiples)
         # calques (overlays SIDECAR + tracks .ver) de la vue active, pour le gestionnaire
-        self._layers = []            # [{kind:'sidecar'|'ver', name, key, visible}]
+        self._layers = []  # [{kind:'sidecar'|'ver', name, key, visible}]
         self._view_only = False
         self._dock_vis_save = {}
         # --- extraction clip ---
         self._extract_start = -1
         self._extract_end = -1
-        self._segments = []          # morceaux [(in, out)] pour le splitting
-        self._export_use_roi = False # rogner l'export sur la ROI (crop vert)
+        self._segments = []  # morceaux [(in, out)] pour le splitting
+        self._export_use_roi = False  # rogner l'export sur la ROI (crop vert)
         # --- capture (options memorisees, choisies dans le popup appareil photo) ---
         self._capture_overlays = True
         # --- affichage ---
         self._crosshair = False
         self._user_adjusting = False  # True quand refresh_frame est appele par l'user (drag/spin)
-        self._temp_sub_on = False     # soustraction temporelle activee
-        self._temp_sub_k  = 1        # decalage k frames
-        self._temp_sub_restore = None # LUT + histogramme avant activation
+        self._temp_sub_on = False  # soustraction temporelle activee
+        self._temp_sub_k = 1  # decalage k frames
+        # (source moteur, 2e lecteur) pour lire la frame N-k sans deplacer le
+        # decodeur de lecture (seek arriere couteux, casse le mode sequentiel).
+        self._temp_ref_reader = None
+        self._temp_sub_restore = None  # LUT + histogramme avant activation
         self._temp_sub_needs_window = False
-        self._profile_coords = None   # (xs, ys) du dernier profil de ligne
-        self._display_bgr = None     # derniere frame rendue (pour Ctrl+C)
+        self._profile_coords = None  # (xs, ys) du dernier profil de ligne
+        self._display_bgr = None  # derniere frame rendue (pour Ctrl+C)
         self._capture_fmt = "png"
         # --- prefetch ---
         self._prefetch_n = 0
         self._prefetch_cache = {}
+        # threads arretes mais pas encore termines : gardes en vie jusqu'a leur
+        # fin (un QThread detruit en cours d'execution fait planter Qt).
+        self._prefetch_retired = set()
+        # dialogues d'export non modaux encore ouverts ou en cours d'export
+        self._export_dialogs = set()
+        self._compose_runner = None
         self._prefetch_thread = None
-        self._annot_load_thread = None   # chargement de dossier YOLO en tache de fond
+        self._annot_load_thread = None  # chargement de dossier YOLO en tache de fond
         # --- mesure fps reel ---
         self._last_tick_t = 0.0
         self._fps_est = 0.0
@@ -230,40 +277,39 @@ class MainWindow(QtWidgets.QMainWindow):
         self.extract_in_btn = self._btn(" IN", self._set_extract_in)
         self.extract_in_btn.setObjectName("extract_in_button")
         self.extract_in_btn.setIcon(icons.icon("bracket_in"))
-        self.extract_in_btn.setToolTip(
-            "Marquer le début du clip à la frame courante")
+        self.extract_in_btn.setToolTip("Marquer le début du clip à la frame courante")
         self.extract_out_btn = self._btn(" OUT", self._set_extract_out)
         self.extract_out_btn.setObjectName("extract_out_button")
         self.extract_out_btn.setIcon(icons.icon("bracket_out"))
-        self.extract_out_btn.setToolTip(
-            "Marquer la fin du clip à la frame courante")
+        self.extract_out_btn.setToolTip("Marquer la fin du clip à la frame courante")
         self.extract_lbl = QtWidgets.QLabel("─")
         self.extract_lbl.setFixedWidth(78)
         self.extract_lbl.setAlignment(Qt.AlignCenter)
         self.extract_lbl.setStyleSheet("color:#888; font-size:11px;")
         self.extract_lbl.setToolTip("Zone sélectionnée pour l'extraction")
         self.extract_clip_btn = self._btn("Extraire...", self._do_extract_clip)
-        self.extract_clip_btn.setToolTip(
-            "Extraire le clip sélectionné (IN → OUT)")
+        self.extract_clip_btn.setToolTip("Extraire le clip sélectionné (IN → OUT)")
         # --- ROI d'export (crop vert) ---
         self.roi_export_btn = self._btn(" ROI", self._toggle_roi_export, checkable=True)
         self.roi_export_btn.setIcon(icons.icon("roi", color="#3fd07a"))
         self.roi_export_btn.setToolTip(
             "Rogner l'export sur une sous-zone.\n"
             "Activer puis tracer un rectangle vert dans la vue :\n"
-            "seule cette zone est exportée (clip IN→OUT et morceaux).")
+            "seule cette zone est exportée (clip IN→OUT et morceaux)."
+        )
         # --- splitting : morceaux multiples ---
         self.seg_add_btn = self._btn(" Ajouter morceau", self._add_segment)
         self.seg_add_btn.setObjectName("add_segment_button")
         self.seg_add_btn.setIcon(icons.icon("plus"))
         self.seg_add_btn.setToolTip(
             "Ajoute la plage IN→OUT courante à la liste des morceaux,\n"
-            "puis réinitialise IN/OUT pour définir le morceau suivant.")
+            "puis réinitialise IN/OUT pour définir le morceau suivant."
+        )
         self.split_extract_btn = self._btn(" Extraire morceaux...", self._open_split_extract)
         self.split_extract_btn.setIcon(icons.icon("scissors"))
         self.split_extract_btn.setToolTip(
-            "Extrait tous les morceaux en une fois "
-            "(nom commun {nom}_{IN}_{OUT}).")
+            "Extrait tous les morceaux en une fois (nom commun {nom}_{IN}_{OUT})."
+        )
 
         # --- enregistrement clics ---
         self.rec_btn = self._btn("REC clics", None, checkable=True)
@@ -272,19 +318,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.undo_btn = self._btn("Annuler clic", self.undo_click)
         self.clear_btn = self._btn("Effacer clics", self.clear_clicks)
 
-        # --- conversion (menu deroulant) / ouverture ---
+        # --- conversion multivue / ouverture ---
+        # En vue unique, chaque vue a son propre bouton Convertir (bandeau) ;
+        # ce bouton du bas n'apparait qu'en multivue (voir _set_split).
         self.convert_btn = QtWidgets.QToolButton()
         self.convert_btn.setObjectName("convert_button")
-        self.convert_btn.setText("Convertir")
-        self.convert_btn.setToolTip("Convertir la sequence courante vers un autre format")
-        self.convert_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.convert_menu = QtWidgets.QMenu(self.convert_btn)
-        self.convert_btn.setMenu(self.convert_menu)
+        self.convert_btn.setText("Convertir (toutes les vues)")
         self.convert_btn.setVisible(False)
-        # en multivue, le menu est retiré et ce bouton devient une action
-        # directe "Convertir toutes les vues" (voir _set_split) ; avec un
-        # QMenu attaché en InstantPopup, clicked() ne se déclenche pas donc
-        # cette connexion reste inoffensive tant qu'un menu est présent.
         self.convert_btn.clicked.connect(self._convert_all_views)
         self.open_file_btn = self._btn("Ouvrir fichier...", self.open_file_dialog)
         self.open_dir_btn = self._btn("Ouvrir dossier...", self.open_dir_dialog)
@@ -364,8 +404,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._all_lbl.hide()
         ctrl = QtWidgets.QHBoxLayout()
         ctrl.addStretch(1)
-        for w in (self.play_btn, self.loop_btn,
-                  self.first_btn, self.prev_btn, self.next_btn, self.last_btn):
+        for w in (
+            self.play_btn,
+            self.loop_btn,
+            self.first_btn,
+            self.prev_btn,
+            self.next_btn,
+            self.last_btn,
+        ):
             ctrl.addWidget(w)
         ctrl.addSpacing(6)
         ctrl.addWidget(self._all_lbl)
@@ -378,7 +424,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._ctrl_widget = QtWidgets.QWidget()
         self._ctrl_widget.setSizePolicy(
-            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred
+        )
         bottom = QtWidgets.QVBoxLayout(self._ctrl_widget)
         bottom.setContentsMargins(0, 0, 0, 0)
         bottom.setSpacing(4)
@@ -386,8 +433,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bottom.addLayout(ctrl)
 
         central = QtWidgets.QWidget()
-        central.setSizePolicy(
-            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        central.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         lay = QtWidgets.QVBoxLayout(central)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.addWidget(self._split_canvas, 1)
@@ -402,17 +448,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._on_tick)
 
+        self._shortcut_map = load_shortcuts(self._plugin_settings())
+        self._qshortcuts = []
         self._shortcuts()
-        # Raccourcis fullscreen -- actifs meme quand un sous-widget a le focus
-        QtGui.QShortcut(Qt.Key_F11, self).activated.connect(self._toggle_view_only)
+        # Echap quitte toujours le plein cadre (non personnalisable : sortie de secours)
         QtGui.QShortcut(Qt.Key_Escape, self).activated.connect(self._exit_fullscreen)
         # Bouton overlay sortie fullscreen
-        self._fs_exit_btn = QtWidgets.QPushButton("\u26f6  Quitter", self)
+        self._fs_exit_btn = QtWidgets.QPushButton("Quitter", self)
+        self._fs_exit_btn.setIcon(icons.icon("fullscreen", color="#ffffff"))
         self._fs_exit_btn.setStyleSheet(
             "QPushButton{background:rgba(20,20,20,200);color:#fff;"
             "border:1px solid #666;border-radius:4px;"
             "padding:6px 14px;font-size:13px;font-weight:bold;}"
-            "QPushButton:hover{background:rgba(80,80,80,220);}")
+            "QPushButton:hover{background:rgba(80,80,80,220);}"
+        )
         self._fs_exit_btn.setFocusPolicy(Qt.NoFocus)
         self._fs_exit_btn.clicked.connect(self._exit_fullscreen)
         self._fs_exit_btn.hide()
@@ -423,7 +472,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Etat/overlay PAR VUE : chaque vue (primaire ET satellites) affiche son
         # propre overlay depuis ses fichiers (cf. _satellite_overlay), voir
         # docs/plugins.md. Le survol/clic interactif reste sur la vue active.
-        self._plugin_menu_actions = []   # [(label, callback)], rempli par PluginAPI.add_menu_action
+        self._plugin_menu_actions = []  # [(label, callback)], rempli par PluginAPI.add_menu_action
         # modele plugin v2 : etat par plugin_id (entrees, contrats de fichiers,
         # cases par element), restaure depuis QSettings (voir docs/plugins.md).
         self._plugin_state = self._load_plugin_state()
@@ -439,20 +488,25 @@ class MainWindow(QtWidgets.QMainWindow):
         # remplit la zone Plugins de l'onglet Parametres, maintenant que les
         # plugins sont decouverts (l'onglet est construit avant le loader).
         self._refresh_plugins_settings()
-        # restaure l'etat ouvert/ferme des panneaux (docks) memorise par user.
+        # etat d'usine (pour « Reinitialiser les reglages ») puis restauration
+        # de l'etat ouvert/ferme des panneaux et des parametres du user.
+        self._default_window_state = self.saveState()
         self._restore_dock_layout()
+        self._init_persisted_params()
         # filtre d'evenements APPLICATIF : les touches mappees aux elements de
         # plugin (manifest element_keys, defaut 'm') doivent basculer les cases
         # meme quand le focus n'est pas sur la vue (panneau plugins, arbre, etc.
         # avalaient la touche) -- cf. _app_key_toggle.
         QtWidgets.QApplication.instance().installEventFilter(self)
         from frameviewer.ui.tutorial import FrameViewerTutorial
+
         self._tutorial = FrameViewerTutorial(self)
         self._i18n = UiTranslationController(self, self._ui_language)
         self._refresh_language_buttons()
         QtCore.QTimer.singleShot(
-            0, lambda: self.resizeDocks(
-                [self.tools_dock, self.right_dock], [260, 360], Qt.Horizontal))
+            0,
+            lambda: self.resizeDocks([self.tools_dock, self.right_dock], [260, 360], Qt.Horizontal),
+        )
 
     # ----- barre d'outils (toggles) -----
     def _start_tutorial(self):
@@ -511,9 +565,7 @@ class MainWindow(QtWidgets.QMainWindow):
             button.setObjectName(f"language_{language}_button")
             button.setText(label)
             button.setCheckable(True)
-            button.setToolTip(
-                "Interface en français" if language == "fr" else "English interface"
-            )
+            button.setToolTip("Interface en français" if language == "fr" else "English interface")
             button.setStyleSheet(
                 "QToolButton{padding:3px 6px;border:1px solid #555;}"
                 "QToolButton#language_fr_button{border-radius:3px 0 0 3px;}"
@@ -542,13 +594,16 @@ class MainWindow(QtWidgets.QMainWindow):
             "QPushButton{padding:3px 10px;border:1px solid transparent;border-radius:3px;}"
             "QPushButton:checked{background:#2d4f70;border-color:#5aafff;"
             "color:#fff;font-weight:bold;}"
-            "QPushButton:hover:!checked{border-color:#666;}")
+            "QPushButton:hover:!checked{border-color:#666;}"
+        )
         self.right_panel_btn = self._btn(
-            "☰  Calque / Hist / Conversion / Param",
-            self._toggle_right_dock, checkable=True)
+            "Calque / Hist / Plugins / Param", self._toggle_right_dock, checkable=True
+        )
         self.right_panel_btn.setToolTip(
             "Ouvre/ferme le panneau : calques SIDECAR/.ver + histogramme,\n"
-            "journal des conversions, paramètres (3 onglets)")
+            "plugins, paramètres (3 onglets)"
+        )
+        self.right_panel_btn.setIcon(icons.icon("menu"))
         self.right_panel_btn.setStyleSheet(_PANEL_SS)
         self.right_panel_btn.setObjectName("right_panel_button")
         tb.addWidget(self.right_panel_btn)
@@ -561,50 +616,53 @@ class MainWindow(QtWidgets.QMainWindow):
             tb.addWidget(b)
 
         tb.addSeparator()
-        self.rot_btn = self._btn("↻ Rot.", self._rotate_90)
+        self.rot_btn = self._btn("Rot.", self._rotate_90)
+        self.rot_btn.setIcon(icons.icon("loop"))
         self.rot_btn.setToolTip("Rotation 90° horaire  (Ctrl+R)")
         tb.addWidget(self.rot_btn)
         # ── split view (menu déroulant) ──
         tb.addSeparator()
         # (label menu, mode, libellé bouton compact, tooltip)
         _SPLIT_ITEMS = [
-            ("◻   Vue unique",            "1",      "Vue unique"),
-            ("▮ ▮   Côte à côte (2)",     "h2",     "Deux vues côte à côte"),
-            ("▬ / ▬   Empilé (2)",        "v2",     "Deux vues empilées"),
-            ("▮ ▮ ▮   3 colonnes",        "h3",     "Trois vues en colonnes"),
-            ("⊞   Grille 2×2 (4)",        "q4",     "Quatre vues en grille"),
-            ("⧉   Fusion (2 → 1, blend)", "fusion", "Superposition alpha de 2 sources"),
-            ("◧ ◨   Temporel (i-N | i)",  "temporal", "Même flux : frame i-N à gauche, i à droite"),
+            ("Vue unique", "1", "Vue unique"),
+            ("Côte à côte (2)", "h2", "Deux vues côte à côte"),
+            ("Empilé (2)", "v2", "Deux vues empilées"),
+            ("3 colonnes", "h3", "Trois vues en colonnes"),
+            ("Grille 2x2 (4)", "q4", "Quatre vues en grille"),
+            ("Fusion (2 -> 1, blend)", "fusion", "Superposition alpha de 2 sources"),
+            ("Temporel (i-N | i)", "temporal", "Même flux : frame i-N à gauche, i à droite"),
         ]
         self.split_btn = QtWidgets.QToolButton()
         self.split_btn.setObjectName("view_layout_button")
         self.split_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.split_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.split_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.split_btn.setIcon(icons.icon("layout_1"))
         self.split_btn.setToolTip("Disposition des vues (split / fusion)")
         self.split_btn.setStyleSheet(
             "QToolButton{padding:3px 10px;border:1px solid #555;border-radius:3px;}"
             "QToolButton:hover{border-color:#5aafff;}"
-            "QToolButton::menu-indicator{width:0px;}")
+            "QToolButton::menu-indicator{width:0px;}"
+        )
         self.split_menu = QtWidgets.QMenu(self.split_btn)
         self.split_btn.setMenu(self.split_menu)
         self._split_actions: dict = {}
         grp = QtGui.QActionGroup(self.split_menu)
         grp.setExclusive(True)
         for lbl, mode, tip in _SPLIT_ITEMS:
-            act = QtGui.QAction(lbl, self.split_menu, checkable=True)
+            act = QtGui.QAction(icons.icon(f"layout_{mode}"), lbl, self.split_menu, checkable=True)
             act.setToolTip(tip)
             act.triggered.connect(lambda _=False, m=mode: self._set_split(m))
             grp.addAction(act)
             self.split_menu.addAction(act)
             self._split_actions[mode] = act
             if mode == "fusion":
-                sep = self.split_menu.insertSeparator(act)
+                self.split_menu.insertSeparator(act)
                 head = QtGui.QAction("Vues liées (2 sources)", self.split_menu)
                 head.setEnabled(False)
                 self.split_menu.insertAction(act, head)
         self._split_labels = {m: lbl for lbl, m, _ in _SPLIT_ITEMS}
         self._split_actions["1"].setChecked(True)
-        self.split_btn.setText("▦  Vues ▾")
+        self.split_btn.setText("Vues")
         tb.addWidget(self.split_btn)
         # contrôle N du mode Temporel (visible seulement dans ce mode) : la vue
         # gauche montre la frame i-N, la droite la frame i (moteur).
@@ -613,8 +671,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.temporal_n_spin.setRange(1, 1000000)
         self.temporal_n_spin.setValue(1)
         self.temporal_n_spin.setFocusPolicy(Qt.ClickFocus)
-        self.temporal_n_spin.setToolTip(
-            "Écart temporel N : la vue gauche affiche la frame i-N")
+        self.temporal_n_spin.setToolTip("Écart temporel N : la vue gauche affiche la frame i-N")
         self.temporal_n_spin.valueChanged.connect(self._on_temporal_n_changed)
         # widgets ajoutes a la barre -> QAction : on masque via l'ACTION pour
         # qu'ils ne laissent aucune trace hors mode temporel.
@@ -631,36 +688,41 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fetch_res_combo.addItem("⅛  (1:8)", 0.125)
         self.fetch_res_combo.setToolTip(
             "Résolution de lecture (toutes les vues)\n"
-            "Pleine = qualité max ; ½/¼/⅛ = plus rapide (réseau/SSH lent)")
+            "Pleine = qualité max ; ½/¼/⅛ = plus rapide (réseau/SSH lent)"
+        )
         self.fetch_res_combo.currentIndexChanged.connect(self._on_fetch_res_changed)
         tb.addWidget(self.fetch_res_combo)
         # lier les vues (zoom / pan / frame synchronisés)
-        self.link_btn = self._btn("🔗 Lier", self._open_link_dialog, checkable=True)
+        self.link_btn = self._btn("Lier", self._open_link_dialog, checkable=True)
+        self.link_btn.setIcon(icons.icon("link"))
         self.link_btn.setObjectName("link_views_button")
         self.link_btn.setToolTip(
             "Lier les vues : zoom, déplacement et frame synchronisés entre\n"
-            "toutes les vues (comparaison côte à côte)")
+            "toutes les vues (comparaison côte à côte)"
+        )
         self.link_btn.setStyleSheet(
             "QPushButton{padding:3px 8px;border:1px solid transparent;border-radius:3px;}"
             "QPushButton:checked{background:#2d4f70;border-color:#5aafff;color:#fff;}"
-            "QPushButton:hover:!checked{border-color:#666;}")
+            "QPushButton:hover:!checked{border-color:#666;}"
+        )
         self.link_btn.setEnabled(False)
         tb.addWidget(self.link_btn)
         # spacer pousse Aide + FS a l'extreme droite
         _spc = QtWidgets.QWidget()
-        _spc.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        _spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         tb.addWidget(_spc)
         self.config_btn = self._btn("Config", self._open_config_dir)
         self.config_btn.setObjectName("config_button")
         self.config_btn.setToolTip(
             "Ouvrir le dossier de configuration utilisateur\n"
-            "(settings.ini + plugins perso, dans AppData\\FrameViewer)")
+            "(settings.ini + plugins perso, dans AppData\\FrameViewer)"
+        )
         tb.addWidget(self.config_btn)
         self.aide_btn = self._btn("Aide", self._show_aide)
         self.aide_btn.setObjectName("help_button")
         tb.addWidget(self.aide_btn)
-        self.fs_btn = self._btn("⛶", self._toggle_view_only)
+        self.fs_btn = self._btn("", self._toggle_view_only)
+        self.fs_btn.setIcon(icons.icon("fullscreen"))
         self.fs_btn.setToolTip("Vue plein cadre / normale  (F11 / Échap)")
         tb.addWidget(self.fs_btn)
 
@@ -680,7 +742,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "border-color:#5aafff;font-weight:bold;}"
             "QTabBar::tab:hover:!selected{background:#2e2e2e;color:#ddd;}"
             "QTabWidget::pane{border:1px solid #555;"
-            "border-top:2px solid #5aafff;}")
+            "border-top:2px solid #5aafff;}"
+        )
         self.right_tab = QtWidgets.QTabWidget()
         self.right_tab.setObjectName("right_panels_tabs")
         self.right_tab.setStyleSheet(_TAB_SS)
@@ -726,11 +789,13 @@ class MainWindow(QtWidgets.QMainWindow):
         _b_all.setToolTip("Cocher (afficher) tous les calques")
         _b_none = self._btn("Aucun", lambda: self._layers_set_all(False))
         _b_none.setToolTip("Décocher (masquer) tous les calques")
-        _b_del = self._btn("Suppr. all  🗑", self._delete_all_layers)
+        _b_del = self._btn("Suppr. tout", self._delete_all_layers)
+        _b_del.setIcon(icons.icon("trash"))
         _b_del.setToolTip(
             "Supprime TOUS les calques listés, immédiatement (pas besoin de\n"
             "les sélectionner). Pour retirer un seul calque/.ver : sélectionne-le\n"
-            "dans la liste puis touche Suppr (multi-sélection possible).")
+            "dans la liste puis touche Suppr (multi-sélection possible)."
+        )
         for _b in (_b_all, _b_none, _b_del):
             _b.setStyleSheet("QPushButton{padding:1px 6px;font-size:11px;}")
             lrow.addWidget(_b)
@@ -746,25 +811,30 @@ class MainWindow(QtWidgets.QMainWindow):
             "• .ver : groupé par fichier ; la case du groupe coche/décoche tous\n"
             "  ses tracks d'un coup — déplie (▸) pour choisir track par track.\n"
             "Sélection + touche Suppr = retirer ce(s) calque(s) (un .ver entier\n"
-            "si le groupe est sélectionné, ou juste le track choisi).")
+            "si le groupe est sélectionné, ou juste le track choisi)."
+        )
         self.layer_list.itemChanged.connect(self._on_layer_item_changed)
         self.layer_list.installEventFilter(self)
         xv.addWidget(self.layer_list)
 
         self.export_layers_btn = self._btn(
-            "Export custom des calques...", self._open_layer_export_dialog)
+            "Export custom des calques...", self._open_layer_export_dialog
+        )
         self.export_layers_btn.setToolTip(
             "Choisir une plage de frames puis réorganiser l'export des tracks\n"
             ".ver : éclater un .ver multi-tracks en plusieurs fichiers mono-track,\n"
-            "ou fusionner plusieurs .ver en un seul fichier multi-tracks.")
+            "ou fusionner plusieurs .ver en un seul fichier multi-tracks."
+        )
         xv.addWidget(self.export_layers_btn)
 
         self.yolo_convert_btn = self._btn(
-            "Convertir .ver <-> YOLO...", self._open_yolo_convert_dialog)
+            "Convertir .ver <-> YOLO...", self._open_yolo_convert_dialog
+        )
         self.yolo_convert_btn.setToolTip(
             "Exporter les calques .ver de cette vue en dataset YOLO (labels +\n"
             "images, split train/val/test), ou importer un dossier YOLO\n"
-            "(un .txt par frame) en .ver.")
+            "(un .txt par frame) en .ver."
+        )
         xv.addWidget(self.yolo_convert_btn)
 
         # (Bouton "Plugins..." retire : la gestion des plugins vit desormais
@@ -776,9 +846,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sidecar_logs = QtWidgets.QListWidget()
         self.sidecar_logs.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
         self.sidecar_logs.setFocusPolicy(Qt.NoFocus)
-        self.sidecar_logs.setMaximumHeight(90)   # réduit : ne prend plus tout l'espace
+        self.sidecar_logs.setMaximumHeight(90)  # réduit : ne prend plus tout l'espace
         self.sidecar_logs.setToolTip(
-            "Numero de la frame + libelle(s) des overlays affiches sur l'image")
+            "Numero de la frame + libelle(s) des overlays affiches sur l'image"
+        )
         xv.addWidget(self.sidecar_logs)
         xv.addStretch(1)
         hw = QtWidgets.QWidget()
@@ -791,7 +862,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # ── Rendu global (LUT + filtres) : s'applique à TOUTES les vues ──
         grp_rnd = QtWidgets.QGroupBox("Rendu — toutes les vues")
         rgl = QtWidgets.QVBoxLayout(grp_rnd)
-        rgl.setContentsMargins(6, 4, 6, 6); rgl.setSpacing(3)
+        rgl.setContentsMargins(6, 4, 6, 6)
+        rgl.setSpacing(3)
         lrow = QtWidgets.QHBoxLayout()
         lrow.addWidget(QtWidgets.QLabel("LUT :"))
         self.lut_hist_combo = QtWidgets.QComboBox()
@@ -802,12 +874,11 @@ class MainWindow(QtWidgets.QMainWindow):
         lrow.addWidget(self.lut_hist_combo, 1)
         rgl.addLayout(lrow)
         frow = QtWidgets.QHBoxLayout()
-        self.flt_edges_chk  = QtWidgets.QCheckBox("Bords")
-        self.flt_sharp_chk  = QtWidgets.QCheckBox("Netteté")
+        self.flt_edges_chk = QtWidgets.QCheckBox("Bords")
+        self.flt_sharp_chk = QtWidgets.QCheckBox("Netteté")
         self.flt_invert_chk = QtWidgets.QCheckBox("Inverser")
-        self.flt_clahe_chk  = QtWidgets.QCheckBox("CLAHE")
-        for _c in (self.flt_edges_chk, self.flt_sharp_chk,
-                   self.flt_invert_chk, self.flt_clahe_chk):
+        self.flt_clahe_chk = QtWidgets.QCheckBox("CLAHE")
+        for _c in (self.flt_edges_chk, self.flt_sharp_chk, self.flt_invert_chk, self.flt_clahe_chk):
             _c.setFocusPolicy(Qt.NoFocus)
             frow.addWidget(_c)
         rgl.addLayout(frow)
@@ -828,7 +899,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Conversions, Paramètres) reflètent la vue sélectionnée.
         _rc = QtWidgets.QWidget()
         _rcl = QtWidgets.QVBoxLayout(_rc)
-        _rcl.setContentsMargins(0, 0, 0, 0); _rcl.setSpacing(2)
+        _rcl.setContentsMargins(0, 0, 0, 0)
+        _rcl.setSpacing(2)
         self.view_strip = QtWidgets.QWidget()
         self._view_strip_lay = QtWidgets.QHBoxLayout(self.view_strip)
         self._view_strip_lay.setContentsMargins(4, 3, 4, 0)
@@ -839,10 +911,8 @@ class MainWindow(QtWidgets.QMainWindow):
         _rcl.addWidget(self.view_strip)
         _rcl.addWidget(self.right_tab, 1)
         self.right_dock.setWidget(_rc)
-        self.right_tab.setSizePolicy(
-            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
-        _rc.setSizePolicy(
-            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.right_tab.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        _rc.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         # Largeur mini garantissant que les 3 onglets (Hist/Calque, Conversions,
         # Paramètres) tiennent tous dans la barre d'onglets dès l'ouverture :
         # sans elle, un right_dock trop etroit au premier lancement fait
@@ -852,19 +922,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.right_dock)
         # Visible par defaut (Calque SIDECAR + histo)
         self.right_tab.currentChanged.connect(
-            lambda i: self._update_right_btns(i if self.right_dock.isVisible() else -1))
+            lambda i: self._update_right_btns(i if self.right_dock.isVisible() else -1)
+        )
         self.right_dock.visibilityChanged.connect(
-            lambda v: self._update_right_btns(
-                self.right_tab.currentIndex() if v else -1))
+            lambda v: self._update_right_btns(self.right_tab.currentIndex() if v else -1)
+        )
 
         # ===== panneaux gauche : Outils TI (haut 2/3) + Historique (bas 1/3) =====
-        self._build_tools_dock()   # doit etre cree avant hist pour le splitDockWidget
+        self._build_tools_dock()  # doit etre cree avant hist pour le splitDockWidget
         self._build_hist_dock()
-        self._build_convlog_dock()
+        self._build_plugins_tab_page()
         self._build_params_dock()
 
     def _build_hist_dock(self):
         self.hist_dock = QtWidgets.QDockWidget("Historique des sources", self)
+        self.hist_dock.setObjectName("history_dock")
         self.hist_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
         icons.restyle_dock_titlebar_buttons(self.hist_dock)
         hw = QtWidgets.QWidget()
@@ -877,7 +949,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hist_list.setToolTip(
             "Double-clic : rouvrir la source\n"
             "Glisser vers un bloc du split : l'y charger\n"
-            "Sélection (Maj/Ctrl) + Suppr : retirer de l'historique")
+            "Sélection (Maj/Ctrl) + Suppr : retirer de l'historique"
+        )
         self.hist_list.itemDoubleClicked.connect(self._load_from_history_item)
         self.hist_list.installEventFilter(self)
         hv.addWidget(self.hist_list, 1)
@@ -929,7 +1002,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Efface les tracés jaunes (ROI, ligne, règle) de toutes les vues."""
         self._roi = None
         self._dyn_crop = False
-        for w in (self._split_canvas._order if hasattr(self, "_split_canvas") else []):
+        for w in self._split_canvas._order if hasattr(self, "_split_canvas") else []:
             vid = getattr(w, "video", None)
             if vid is not None:
                 vid.clear_roi()
@@ -945,8 +1018,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """Répartit Outils TI (2/3) / Historique (1/3)."""
         h = self.height()
         if h > 0:
-            self.resizeDocks([self.tools_dock, self.hist_dock],
-                             [h * 67 // 100, h * 33 // 100], Qt.Vertical)
+            self.resizeDocks(
+                [self.tools_dock, self.hist_dock], [h * 67 // 100, h * 33 // 100], Qt.Vertical
+            )
 
     def _on_tool_mode(self, mode):
         # changer d'outil efface les tracés jaunes de l'outil précédent
@@ -969,8 +1043,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_profile_hovered(self, index):
         coords = self._profile_coords
         profile = getattr(self.tools_panel, "_profile", None)
-        if (index < 0 or coords is None or profile is None
-                or index >= len(profile) or index >= len(coords[0])):
+        if (
+            index < 0
+            or coords is None
+            or profile is None
+            or index >= len(profile)
+            or index >= len(coords[0])
+        ):
             self.view.set_line_probe()
             return
         self.view.set_line_probe(coords[0][index], coords[1][index], profile[index])
@@ -987,39 +1066,43 @@ class MainWindow(QtWidgets.QMainWindow):
         if bgr.ndim == 3:
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             h, w = rgb.shape[:2]
-            qimg = QtGui.QImage(
-                rgb.data, w, h, rgb.strides[0],
-                QtGui.QImage.Format_RGB888).copy()
+            qimg = QtGui.QImage(rgb.data, w, h, rgb.strides[0], QtGui.QImage.Format_RGB888).copy()
         else:
             h, w = bgr.shape
             qimg = QtGui.QImage(
-                bgr.data, w, h, bgr.strides[0],
-                QtGui.QImage.Format_Grayscale8).copy()
-        fps = getattr(self.source, 'fps', 25.0) or 25.0
-        ts  = fmt_time(self.cur / max(fps, 0.001))
-        meta = (f"Source : {self.source.name}\n"
-                f"Frame  : {self.cur} / {self.source.count - 1}\n"
-                f"Temps  : {ts}\n"
-                f"Fenêtre: lo={self.hist.lo:.1f}  hi={self.hist.hi:.1f}\n"
-                f"LUT    : {self.lut_combo.currentText()}")
+                bgr.data, w, h, bgr.strides[0], QtGui.QImage.Format_Grayscale8
+            ).copy()
+        fps = getattr(self.source, "fps", 25.0) or 25.0
+        ts = fmt_time(self.cur / max(fps, 0.001))
+        meta = (
+            f"Source : {self.source.name}\n"
+            f"Frame  : {self.cur} / {self.source.count - 1}\n"
+            f"Temps  : {ts}\n"
+            f"Fenêtre: lo={self.hist.lo:.1f}  hi={self.hist.hi:.1f}\n"
+            f"LUT    : {self.lut_combo.currentText()}"
+        )
         mime = QtCore.QMimeData()
         mime.setImageData(qimg)
         mime.setText(meta)
         QtWidgets.QApplication.clipboard().setMimeData(mime)
         self.statusBar().showMessage(
-            "Image + métadonnées copiées dans le presse-papier (Ctrl+V pour coller)", 3000)
+            "Image + métadonnées copiées dans le presse-papier (Ctrl+V pour coller)", 3000
+        )
 
     # ----- FFT 2D spatiale sur le crop ROI (frame courante) -----
     def _run_fft2d(self):
         if self.source is None or self._roi is None or self._raw is None:
             self.statusBar().showMessage(
-                "FFT 2D : charger une source et tracer une ROI d'abord", 3000)
+                "FFT 2D : charger une source et tracer une ROI d'abord", 3000
+            )
             return
         x, y, w, h = self._roi
         inten = to_intensity(self._apply_rotation(self._raw))
         Hf, Wf = inten.shape[:2]
-        x1 = max(0, int(x)); y1 = max(0, int(y))
-        x2 = min(Wf, x1 + int(w)); y2 = min(Hf, y1 + int(h))
+        x1 = max(0, int(x))
+        y1 = max(0, int(y))
+        x2 = min(Wf, x1 + int(w))
+        y2 = min(Hf, y1 + int(h))
         if x2 - x1 < 4 or y2 - y1 < 4:
             self.statusBar().showMessage("FFT 2D : ROI trop petite", 3000)
             return
@@ -1028,16 +1111,19 @@ class MainWindow(QtWidgets.QMainWindow):
         F = np.fft.fftshift(np.fft.fft2(crop))
         mag = np.log1p(np.abs(F))
         mn, mx = float(mag.min()), float(mag.max())
-        spec = np.zeros_like(mag, dtype=np.uint8) if mx <= mn else \
-            ((mag - mn) / (mx - mn) * 255.0).astype(np.uint8)
+        spec = (
+            np.zeros_like(mag, dtype=np.uint8)
+            if mx <= mn
+            else ((mag - mn) / (mx - mn) * 255.0).astype(np.uint8)
+        )
         spec = np.ascontiguousarray(spec)
         ch, cw = spec.shape
-        qimg = QtGui.QImage(spec.data, cw, ch, spec.strides[0],
-                            QtGui.QImage.Format_Grayscale8).copy()
+        qimg = QtGui.QImage(
+            spec.data, cw, ch, spec.strides[0], QtGui.QImage.Format_Grayscale8
+        ).copy()
         box = self.tools_panel.fft2d_label.size()
         tgt = box if (box.width() > 10 and box.height() > 10) else QtCore.QSize(200, 160)
-        pix = QtGui.QPixmap.fromImage(qimg).scaled(
-            tgt, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pix = QtGui.QPixmap.fromImage(qimg).scaled(tgt, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         info = f"Spectre FFT 2D — crop {cw}×{ch} px"
         self.tools_panel.show_fft2d(pix, info)
         self.statusBar().showMessage(info, 3000)
@@ -1053,11 +1139,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if act is not None and not act.isChecked():
             act.setChecked(True)
         # libellé compact du bouton reflétant le mode courant
-        short = {"1": "▦  Vues ▾", "h2": "▮▮  Vues ▾", "v2": "▬/▬  Vues ▾",
-                 "h3": "▮▮▮  Vues ▾", "q4": "⊞  Vues ▾", "fusion": "⧉  Fusion ▾",
-                 "temporal": "◧◨  Temporel ▾"}
-        self.split_btn.setText(short.get(mode, "▦  Vues ▾"))
-        _temporal = (mode == "temporal")
+        short = {
+            "1": "Vues",
+            "h2": "Vues : 2",
+            "v2": "Vues : 2",
+            "h3": "Vues : 3",
+            "q4": "Vues : 4",
+            "fusion": "Fusion",
+            "temporal": "Temporel",
+        }
+        self.split_btn.setText(short.get(mode, "Vues"))
+        self.split_btn.setIcon(icons.icon(f"layout_{mode}"))
+        _temporal = mode == "temporal"
         self._temporal_n_lbl_act.setVisible(_temporal)
         self._temporal_n_spin_act.setVisible(_temporal)
         # Barre du bas toujours visible. En multivue : version épurée (fps
@@ -1075,32 +1168,41 @@ class MainWindow(QtWidgets.QMainWindow):
             # les vues d'un coup (_bar_play / _bar_step), pas seulement le
             # moteur. loop/first/last restent reserves a la vue unique
             # (redondants avec la mini-barre de chaque vue en multivue).
-            for w in (self.loop_btn, self.first_btn, self.last_btn,
-                      self.fps_label, self.open_file_btn, self.open_dir_btn):
+            for w in (
+                self.loop_btn,
+                self.first_btn,
+                self.last_btn,
+                self.fps_label,
+                self.open_file_btn,
+                self.open_dir_btn,
+            ):
                 w.setVisible(not multi)
             self._ctrl_widget.setStyleSheet(
                 "QWidget{background:#1a1a1f;border:1px solid #33333c;"
                 "border-radius:8px;color:#ffffff;}"
                 "QPushButton{color:#ffffff;padding:4px 10px;}"
-                "QLabel{color:#ffffff;}" if multi else "")
+                "QLabel{color:#ffffff;}"
+                if multi
+                else ""
+            )
             self._all_lbl.setVisible(multi)
             _bottom_lay = self._ctrl_widget.layout()
             if _bottom_lay is not None:
-                _bottom_lay.setContentsMargins(8, 10, 8, 8) if multi else \
-                    _bottom_lay.setContentsMargins(0, 0, 0, 0)
+                _bottom_lay.setContentsMargins(
+                    8, 10, 8, 8
+                ) if multi else _bottom_lay.setContentsMargins(0, 0, 0, 0)
             if hasattr(self, "_central_lay"):
                 self._central_lay.setSpacing(10 if multi else 6)
             if multi:
-                self.convert_btn.setMenu(None)
-                set_ui_text(self.convert_btn, "🎬 Convertir (toutes les vues)")
+                set_ui_text(self.convert_btn, "Convertir (toutes les vues)")
                 set_ui_tooltip(
                     self.convert_btn,
                     "Assemble un MP4 de la composition multi-vues actuelle\n"
-                    "(disposition, calques et contraste inclus).")
+                    "(disposition, calques et contraste inclus).",
+                )
                 self.convert_btn.setVisible(True)
             else:
-                self.convert_btn.setMenu(self.convert_menu)
-                self._rebuild_convert_menu()
+                self.convert_btn.setVisible(False)
         self._update_view_strip()
         # (re)câbler les signaux de lien pour les vues nouvellement créées
         if self._link_views:
@@ -1114,11 +1216,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if mode == "fusion":
             self.statusBar().showMessage(
                 "Fusion : bloc haut-gauche = source principale, "
-                "déposez une 2ᵉ source en haut-droite. α réglable en bas (orange).", 6000)
+                "déposez une 2ᵉ source en haut-droite. α réglable en bas (orange).",
+                6000,
+            )
         elif mode == "temporal":
             self.statusBar().showMessage(
                 "Temporel : même flux, frame i-N à gauche et i à droite. "
-                "Réglez N dans la barre d'outils.", 6000)
+                "Réglez N dans la barre d'outils.",
+                6000,
+            )
 
     # ----- mode temporel (i-N | i, même flux) -----
     def _reopen_source_like(self, src):
@@ -1129,17 +1235,25 @@ class MainWindow(QtWidgets.QMainWindow):
         if src is None:
             return None
         try:
-            if isinstance(src, YuvSource):   # avant le test paths (sinon relu en images)
-                return YuvSource(list(src.paths), src.width, src.height, src.fmt,
-                                 label=src.name, directory=src.directory)
+            if isinstance(src, YuvSource):  # avant le test paths (sinon relu en images)
+                return YuvSource(
+                    list(src.paths),
+                    src.width,
+                    src.height,
+                    src.fmt,
+                    label=src.name,
+                    directory=src.directory,
+                )
             path = getattr(src, "path", None)
             if path:
                 return self._build_source(path)
             paths = getattr(src, "paths", None)
             if paths:
                 return ImageSequenceSource(
-                    list(paths), label=getattr(src, "name", "sequence"),
-                    directory=getattr(src, "_dir", None))
+                    list(paths),
+                    label=getattr(src, "name", "sequence"),
+                    directory=getattr(src, "_dir", None),
+                )
         except Exception as ex:
             self.statusBar().showMessage(f"Temporel : réouverture impossible ({ex})", 4000)
         return None
@@ -1154,13 +1268,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._close_temporal_source()
         clone = self._reopen_source_like(self.source)
         if clone is None:
-            self.statusBar().showMessage(
-                "Temporel : type de source non clonable.", 4000)
+            self.statusBar().showMessage("Temporel : type de source non clonable.", 4000)
             return
         self._temporal_src = clone
-        sat.load(clone, self.hist.lo, self.hist.hi, self.lut_combo.currentData(),
-                 self._cube_lut, self._cube_size, self.hist.full_range,
-                 self._filter_flags())
+        sat.load(
+            clone,
+            self.hist.lo,
+            self.hist.hi,
+            self.lut_combo.currentData(),
+            self._cube_lut,
+            self._cube_size,
+            self.hist.full_range,
+            self._filter_flags(),
+        )
         sat.set_fetch_scale(self._fetch_scale)
 
     def _close_temporal_source(self):
@@ -1174,8 +1294,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _enter_temporal(self):
         if self.source is None:
-            self.statusBar().showMessage(
-                "Temporel : ouvrez d'abord une source.", 4000)
+            self.statusBar().showMessage("Temporel : ouvrez d'abord une source.", 4000)
             return
         self._ensure_temporal_source()
         self._sync_temporal(self.cur)
@@ -1185,7 +1304,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         sats = getattr(self._split_canvas, "_sats", [])
         if sats:
-            sats[0].clear()     # ne pas laisser traîner le clone dans la vue
+            sats[0].clear()  # ne pas laisser traîner le clone dans la vue
         self._close_temporal_source()
 
     def _on_temporal_n_changed(self, _v):
@@ -1227,18 +1346,28 @@ class MainWindow(QtWidgets.QMainWindow):
                 role = "temporal_ref" if (temporal and w is tsat) else "satellite"
                 last = getattr(w, "_last_bgr", None)
                 hpx, wpx = (last.shape[0], last.shape[1]) if last is not None else (0, 0)
-            views.append({
-                "index": index,
-                "role": role,
-                "view_key": self._view_key_for(src) if src is not None else "__none__",
-                "source_name": getattr(src, "name", "") if src is not None else "",
-                "frame_idx": int(fidx) if fidx is not None else None,
-                "start_frame": (self._link_start_frames[index]
-                                if index < len(self._link_start_frames) else 0),
-                "w": int(wpx), "h": int(hpx),
-            })
-        ctx = {"mode": sc.mode(), "count": len(views), "views": views,
-               "sync_base_frame": int(self._sync_base_frame)}
+            views.append(
+                {
+                    "index": index,
+                    "role": role,
+                    "view_key": self._view_key_for(src) if src is not None else "__none__",
+                    "source_name": getattr(src, "name", "") if src is not None else "",
+                    "frame_idx": int(fidx) if fidx is not None else None,
+                    "start_frame": (
+                        self._link_start_frames[index]
+                        if index < len(self._link_start_frames)
+                        else 0
+                    ),
+                    "w": int(wpx),
+                    "h": int(hpx),
+                }
+            )
+        ctx = {
+            "mode": sc.mode(),
+            "count": len(views),
+            "views": views,
+            "sync_base_frame": int(self._sync_base_frame),
+        }
         if temporal:
             ctx["n_offset"] = int(self.temporal_n_spin.value())
         return ctx
@@ -1252,14 +1381,26 @@ class MainWindow(QtWidgets.QMainWindow):
             if not imgs:
                 return None
             return ImageSequenceSource(imgs, label=os.path.basename(p), directory=p)
-        if ext in ('.mp4', '.avi', '.mov', '.mkv', '.m4v', '.wmv',
-                   '.flv', '.webm', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts'):
+        if ext in (
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".mkv",
+            ".m4v",
+            ".wmv",
+            ".flv",
+            ".webm",
+            ".mpg",
+            ".mpeg",
+            ".ts",
+            ".m2ts",
+            ".mts",
+        ):
             return VideoSource(p)
         if supports_path(p, "sequence_format"):
             return SpecializedSource(p)
-        if ext in ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp', '.jp2'):
-            return ImageSequenceSource(
-                [p], label=os.path.basename(p), directory=os.path.dirname(p))
+        if ext in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".jp2"):
+            return ImageSequenceSource([p], label=os.path.basename(p), directory=os.path.dirname(p))
         return None
 
     def _on_view_media_dropped(self, pos: int, paths: list):
@@ -1275,11 +1416,11 @@ class MainWindow(QtWidgets.QMainWindow):
         media = [p for p in paths if p not in data]
         if data:
             if w is not self._primary_frame:
-                self._on_activate_pos(pos)     # la vue ciblée devient la primaire
+                self._on_activate_pos(pos)  # la vue ciblée devient la primaire
                 w = self._primary_frame
             for p in data:
                 if not self._offer_plugin_drop(p):
-                    self._plugin_loader.dispatch_drop(p)   # repli : plugins legacy
+                    self._plugin_loader.dispatch_drop(p)  # repli : plugins legacy
             if not media:
                 return
         if w is self._primary_frame:
@@ -1301,9 +1442,16 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if src is None:
             return
-        w.load(src, self.hist.lo, self.hist.hi,
-               self.lut_combo.currentData(), self._cube_lut, self._cube_size,
-               self.hist.full_range, self._filter_flags())
+        w.load(
+            src,
+            self.hist.lo,
+            self.hist.hi,
+            self.lut_combo.currentData(),
+            self._cube_lut,
+            self._cube_size,
+            self.hist.full_range,
+            self._filter_flags(),
+        )
         w.set_fetch_scale(self._fetch_scale)
         self._add_to_history(src)
 
@@ -1336,15 +1484,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # -- état moteur <-> vue --
     def _engine_export(self):
-        return dict(source=self.source, cur=self.cur,
-                    lo=self.hist.lo, hi=self.hist.hi,
-                    mode=self.hist.per_frame_mode(),
-                    zoom=self.view.get_view(),
-                    rec_on=self.rec_btn.isChecked() if hasattr(self, "rec_btn") else False,
-                    overlays=self.overlays, annots=self._annotations,
-                    annot_path=self._annot_path, layers=list(self._layers),
-                    track_next=self._annot_track_next,
-                    name=self.source.name if self.source else "")
+        return dict(
+            source=self.source,
+            cur=self.cur,
+            lo=self.hist.lo,
+            hi=self.hist.hi,
+            mode=self.hist.per_frame_mode(),
+            zoom=self.view.get_view(),
+            rec_on=self.rec_btn.isChecked() if hasattr(self, "rec_btn") else False,
+            overlays=self.overlays,
+            annots=self._annotations,
+            annot_path=self._annot_path,
+            layers=list(self._layers),
+            track_next=self._annot_track_next,
+            name=self.source.name if self.source else "",
+        )
 
     def _engine_import(self, st):
         src = st.get("source")
@@ -1406,15 +1560,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self._enable_playback(False)
             self._update_sidecar_logs([])
             return
-        self.hist.set_window(st.get("lo", self.hist.lo),
-                             st.get("hi", self.hist.hi), emit=False)
+        self.hist.set_window(st.get("lo", self.hist.lo), st.get("hi", self.hist.hi), emit=False)
         # mode (Auto/Min-Max/Pleine plage/manuel) propre à la vue : restauré
         # AVANT show_index pour que le premier _display() de la nouvelle vue
         # respecte ce mode plutôt que celui, global, laissé par la vue quittée.
         self.hist.set_mode_silent(st.get("mode", "Custom"))
         n = src.count
         self.slider.blockSignals(True)
-        self.slider.setMinimum(0); self.slider.setMaximum(max(0, n - 1))
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(max(0, n - 1))
         self.slider.blockSignals(False)
         self.frame_spin.blockSignals(True)
         self.frame_spin.setRange(0, max(0, n - 1))
@@ -1427,7 +1581,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fps_spin.blockSignals(False)
         self._primary_frame.set_name(src.name)
         self._primary_frame.mini.set_range(n)
-        self._rebuild_convert_menu()
         if self._audio_player is not None:
             if isinstance(src, VideoSource):
                 self._audio_player.setSource(QUrl.fromLocalFile(os.path.abspath(src.path)))
@@ -1437,9 +1590,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_clicks_file()
         self._load_existing_clicks()
         self._enable_playback(True)
-        self.setWindowTitle(f"FrameViewer - {src.name}")
+        self.setWindowTitle(f"FrameViewer {__version__} - {src.name}")
         self.sidecar_label.setText(
-            f"{len(self.overlays)} frames annotees" if self.overlays else "Aucun SIDECAR charge")
+            f"{len(self.overlays)} frames annotees" if self.overlays else "Aucun SIDECAR charge"
+        )
         self.show_index(st.get("cur", 0))
         # zoom / pan restaurés après le chargement de la frame (dimensions
         # de l'image connues -> le clamp du pan est correct).
@@ -1447,7 +1601,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._highlight_history()
 
     def _on_view_convert_clicked(self, pos: int):
-        """Bouton ⇄ d'une vue : l'active si besoin, puis ouvre le dialogue de
+        """Bouton Convertir d'une vue : l'active si besoin, puis ouvre le dialogue de
         conversion (Extraire...) sur toute sa séquence, avec le même bouton
         « exporter la vue telle qu'affichée » que pour l'extraction IN→OUT."""
         sc = self._split_canvas
@@ -1462,25 +1616,26 @@ class MainWindow(QtWidgets.QMainWindow):
         n = self.source.count
         dlg = ClipExtractDialog(self, 0, max(0, n - 1), has_in_out=False)
         dlg.setWindowTitle(f"Convertir — vue [{pos + 1}] : {self.source.name}")
-        dlg.exec()
+        self._show_export_dialog(dlg)
 
     def _on_roi_convert(self):
         """Bouton « Convertir » du panneau ROI : exporte la ROI (fixe ou
         suivant une boîte .ver) sur toute la séquence."""
         if self.source is None or self._roi is None:
             QtWidgets.QMessageBox.information(
-                self, "Convertir la ROI",
+                self,
+                "Convertir la ROI",
                 "Trace d'abord une ROI (glisser sur l'image), ou clique\n"
-                "une boîte .ver pour la suivre, avant de convertir.")
+                "une boîte .ver pour la suivre, avant de convertir.",
+            )
             return
-        dlg = RoiConvertDialog(self)
-        dlg.exec()
+        self._show_export_dialog(RoiConvertDialog(self))
 
     def _on_activate_pos(self, pos: int):
         """Sélection d'une vue : le moteur s'y rattache (outils TI + histogramme)."""
         sc = self._split_canvas
         if sc.is_temporal():
-            return   # rôles figés : la droite est toujours le moteur, la gauche est figée
+            return  # rôles figés : la droite est toujours le moteur, la gauche est figée
         w = sc.widget_at(pos)
         if w is None:
             return
@@ -1555,7 +1710,8 @@ class MainWindow(QtWidgets.QMainWindow):
             b.setFixedHeight(20)
             b.setStyleSheet(
                 "QPushButton{padding:1px 8px;border:1px solid #444;border-radius:3px;}"
-                "QPushButton:checked{background:#2d4f70;border-color:#5aafff;color:#fff;}")
+                "QPushButton:checked{background:#2d4f70;border-color:#5aafff;color:#fff;}"
+            )
             b.clicked.connect(lambda _=False, p=i: self._on_activate_pos(p))
             self._view_btns.append(b)
             self._view_strip_lay.insertWidget(1 + i, b)
@@ -1573,7 +1729,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_view_strip()
         self.statusBar().showMessage(
             "Vue fusion sélectionnée : trace une ROI dessus (mesures), "
-            "règle α, ou « ⤓ Extraire » pour récupérer le blend.", 5000)
+            "règle α, ou « Extraire » pour récupérer le blend.",
+            5000,
+        )
 
     def _on_fusion_roi(self, x, y, w, h):
         """ROI tracée sur le rendu fusionné : stats calculées sur le blend."""
@@ -1583,21 +1741,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tools_panel.roi_panel.clear()
             return
         H, W = out.shape[:2]
-        x1 = max(0, min(int(x), W - 1)); y1 = max(0, min(int(y), H - 1))
-        x2 = min(W, x1 + int(w)); y2 = min(H, y1 + int(h))
+        x1 = max(0, min(int(x), W - 1))
+        y1 = max(0, min(int(y), H - 1))
+        x2 = min(W, x1 + int(w))
+        y2 = min(H, y1 + int(h))
         if x2 <= x1 or y2 <= y1:
             self.tools_panel.roi_panel.clear()
             return
         bgr_crop = out[y1:y2, x1:x2]
-        inten_crop = (cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2GRAY)
-                      if bgr_crop.ndim == 3 else bgr_crop)
+        inten_crop = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2GRAY) if bgr_crop.ndim == 3 else bgr_crop
         if self.tools_dock.isHidden():
-            self.tools_dock.show(); self.tools_dock.raise_()
+            self.tools_dock.show()
+            self.tools_dock.raise_()
         if not self.tools_panel.is_roi_active():
             self.tools_panel._set_tool("roi")
         self.tools_panel.roi_panel.update_crop(bgr_crop, inten_crop)
-        self.statusBar().showMessage(
-            f"ROI sur le rendu fusionné — {x2 - x1}×{y2 - y1} px", 3000)
+        self.statusBar().showMessage(f"ROI sur le rendu fusionné — {x2 - x1}×{y2 - y1} px", 3000)
 
     # ----- lien des vues (zoom / pan / frame) -----
     def _all_view_videos(self):
@@ -1621,10 +1780,12 @@ class MainWindow(QtWidgets.QMainWindow):
         sources = []
         for _index, widget, is_primary in self._split_canvas.ordered_views():
             source = self.source if is_primary else getattr(widget, "_source", None)
-            sources.append({
-                "name": getattr(source, "name", "") if source is not None else "",
-                "count": getattr(source, "count", 0) if source is not None else 0,
-            })
+            sources.append(
+                {
+                    "name": getattr(source, "name", "") if source is not None else "",
+                    "count": getattr(source, "count", 0) if source is not None else 0,
+                }
+            )
         return sources
 
     def _starts_for_mode(self, mode=None):
@@ -1672,7 +1833,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._apply_link_base(0)
             starts = ", ".join(str(v) for v in self._link_start_frames)
             self.statusBar().showMessage(
-                f"Vues liées : départs [{starts}], zoom / déplacement / frame synchronisés", 5000)
+                f"Vues liées : départs [{starts}], zoom / déplacement / frame synchronisés", 5000
+            )
         else:
             self.statusBar().showMessage("Vues déliées", 2000)
 
@@ -1696,7 +1858,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._syncing = True
         try:
             for index, widget, is_primary in self._split_canvas.ordered_views():
-                start = self._link_start_frames[index] if index < len(self._link_start_frames) else 0
+                start = (
+                    self._link_start_frames[index] if index < len(self._link_start_frames) else 0
+                )
                 target = base + int(start)
                 if is_primary:
                     if self.source is not None and self.cur != target:
@@ -1743,27 +1907,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # forward aux plugins "overlay code" (hook on_view_hover) : coords image
         if self.source is not None and x >= 0 and y >= 0:
             self._plugin_loader.dispatch_hover(self.cur, x, y)
-        src = self._probe_src
-        if x < 0 or y < 0 or src is None:
-            self.view.set_probe_text(None)
-            return
-        H, W = src.shape[:2]
-        if 0 <= y < H and 0 <= x < W:
-            v = src[y, x]
-            if np.ndim(v) == 0:
-                vtxt = f"{float(v):.4g}"
-            else:
-                vtxt = "/".join(f"{float(c):.4g}" for c in np.atleast_1d(v))
-            self.view.set_probe_text(f"x= {x}   y= {y}   v= {vtxt}")
-        else:
-            self.view.set_probe_text(None)
+        self.view.set_probe_text(probe_text(self._probe_src, x, y))
 
     def _view_source_and_window(self, w):
         """Source + fenêtre (lo,hi) d'une vue (principale = moteur, sinon satellite)."""
         if w is self._primary_frame:
             return self.source, (self.hist.lo, self.hist.hi)
-        return getattr(w, "_source", None), (getattr(w, "_rp", (0, 255))[0],
-                                             getattr(w, "_rp", (0, 255))[1])
+        return getattr(w, "_source", None), (
+            getattr(w, "_rp", (0, 255))[0],
+            getattr(w, "_rp", (0, 255))[1],
+        )
 
     def _extract_fusion(self):
         """Extrait le rendu fusionné (blend des 2 vues du haut) comme une source."""
@@ -1774,16 +1927,36 @@ class MainWindow(QtWidgets.QMainWindow):
         src_b, rp_b = self._view_source_and_window(sc._order[1])
         if src_a is None and src_b is None:
             self.statusBar().showMessage(
-                "Fusion : charger une source dans les deux vues du haut", 4000)
+                "Fusion : charger une source dans les deux vues du haut", 4000
+            )
             return
+        # lecteurs propres a l'export : il ne deplace jamais les vues affichees
+        own_readers = []
+        for_export = []
+        for src in (src_a, src_b):
+            reader = self._reopen_source_like(src) if src is not None else None
+            if reader is not None:
+                own_readers.append(reader)
+            for_export.append(reader or src)
+        src_a, src_b = for_export
         alpha = sc._fusion._alpha if sc._fusion else 0.5
         mode = sc._fusion.mode() if sc._fusion else "alpha"
-        fsrc = FusionSource(src_a, rp_a, src_b, rp_b,
-                            self.lut_combo.currentData(), self._cube_lut,
-                            self._cube_size, self.hist.full_range,
-                            self._filter_flags(), alpha, mode)
+        fsrc = FusionSource(
+            src_a,
+            rp_a,
+            src_b,
+            rp_b,
+            self.lut_combo.currentData(),
+            self._cube_lut,
+            self._cube_size,
+            self.hist.full_range,
+            self._filter_flags(),
+            alpha,
+            mode,
+        )
         if fsrc.count <= 0:
             self.statusBar().showMessage("Fusion : séquences vides", 4000)
+            self._close_readers(own_readers)
             return
         # plage IN→OUT si définie, sinon toute la séquence
         s = self._extract_start if self._extract_start >= 0 else 0
@@ -1797,12 +1970,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self._rotation = 0
         try:
             dlg = ClipExtractDialog(self, s, e)
-            dlg.exec()
         finally:
             self.source = saved_src
             self._raw = saved_raw
             self.cur = saved_cur
             self._rotation = saved_rot
+        dlg.destroyed.connect(lambda *_a, rs=tuple(own_readers): self._close_readers(rs))
+        self._show_export_dialog(dlg)
+
+    @staticmethod
+    def _close_readers(readers):
+        for reader in readers:
+            try:
+                reader.close()
+            except Exception:
+                pass  # lecteurs jetables de l'export fusion
+
+    def _show_export_dialog(self, dlg):
+        """Ouvre un dialogue d'export NON modal : la fenetre principale reste
+        utilisable pendant l'export (voir ui/export_jobs.py)."""
+        self._export_dialogs.add(dlg)
+        dlg.destroyed.connect(lambda *_a, d=dlg: self._export_dialogs.discard(d))
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def _on_view_doubled(self, pos: int):
         """Double-clic : plein écran sur cette vue / retour à la disposition."""
@@ -1869,8 +2060,9 @@ class MainWindow(QtWidgets.QMainWindow):
         """Les vues autres que la vue active (pilotée par le moteur)."""
         if not hasattr(self, "_split_canvas"):
             return []
-        return [w for w in self._split_canvas._order
-                if w is not self._primary_frame and w.has_source()]
+        return [
+            w for w in self._split_canvas._order if w is not self._primary_frame and w.has_source()
+        ]
 
     def _bar_play(self):
         self._set_kbd_target("all")
@@ -1943,7 +2135,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._temp_sub_restore = None
             self._temp_sub_needs_window = False
         self._temp_sub_on = enabled
-        self._temp_sub_k  = k
+        self._temp_sub_k = k
         self.refresh_frame()
 
     def _temporal_difference(self, frame, frame_index, rotate_reference=False):
@@ -1951,7 +2143,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._temp_sub_on or self.source is None or frame is None:
             return frame
         ref_idx = max(0, int(frame_index) - max(1, int(self._temp_sub_k)))
-        ref_raw = self.source.get(ref_idx)
+        ref_raw = self._temporal_reference_reader().get(ref_idx)
         if ref_raw is None:
             return frame
         if rotate_reference:
@@ -1959,15 +2151,43 @@ class MainWindow(QtWidgets.QMainWindow):
         current = to_intensity(frame).astype(np.float32)
         reference = to_intensity(ref_raw).astype(np.float32)
         if current.shape != reference.shape:
-            return frame
+            # frame affichee reduite (resolution de lecture 1:N) et reference
+            # lue en pleine taille : on aligne la reference sur la frame.
+            if current.ndim != 2 or reference.ndim != 2:
+                return frame
+            reference = cv2.resize(
+                reference, (current.shape[1], current.shape[0]), interpolation=cv2.INTER_AREA
+            )
         return current - reference
 
-    def _build_convlog_dock(self):
-        # Onglet 1 : Plugins (remplace l'ancien onglet "Conversions" -- son
-        # journal est deplace dans Parametres). Tout le plugin vit ici :
+    def _temporal_reference_reader(self):
+        """Lecteur dedie a la frame de reference N-k, rouvert si la source change.
+
+        Repli sur la source moteur quand le type ne se rouvre pas."""
+        held = self._temp_ref_reader
+        if held is not None and held[0] is self.source:
+            return held[1]
+        self._close_temporal_reference_reader()
+        reader = self._reopen_source_like(self.source) or self.source
+        self._temp_ref_reader = (self.source, reader)
+        return reader
+
+    def _close_temporal_reference_reader(self):
+        held = self._temp_ref_reader
+        self._temp_ref_reader = None
+        if held is not None and held[1] is not held[0]:
+            try:
+                held[1].close()
+            except Exception:
+                pass  # lecteur jetable : un echec de fermeture n'a pas d'effet
+
+    def _build_plugins_tab_page(self):
+        # Onglet 1 : Plugins (remplace l'ancien onglet "Conversions"). Tout le
+        # plugin vit ici :
         # activation, CSV rattaches (drag-drop + cases), cases par element du
         # modele "overlay code", et les boutons d'edition/creation.
-        self.right_tab.addTab(self._build_plugins_tab(), icons.icon("puzzle"), "Plugins")
+        self._plugins_page = self._build_plugins_tab()
+        self.right_tab.addTab(self._plugins_page, icons.icon("puzzle"), "Plugins")
 
     def _show_right_tab(self, idx):
         """Affiche l'onglet droit idx; masque si deja visible sur cet onglet."""
@@ -1979,6 +2199,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.right_dock.show()
             self.right_dock.raise_()
             self._update_right_btns(idx)
+
+    def _show_right_tab_page(self, page):
+        """Raccourci clavier vers un onglet du panneau droit (bascule)."""
+        idx = self.right_tab.indexOf(page)
+        if idx >= 0:
+            self._show_right_tab(idx)
 
     def _toggle_right_dock(self):
         """Bouton unique de la barre d'outils : ouvre/ferme right_dock, sur
@@ -2011,7 +2237,8 @@ class MainWindow(QtWidgets.QMainWindow):
         lbl = QtWidgets.QLabel(text)
         lbl.setStyleSheet(
             "color:#5aafff; font-size:11px; font-weight:bold;"
-            "padding-top:2px; border-bottom:1px solid #3a3a42;")
+            "padding-top:2px; border-bottom:1px solid #3a3a42;"
+        )
         return lbl
 
     def _build_params_dock(self):
@@ -2032,13 +2259,14 @@ class MainWindow(QtWidgets.QMainWindow):
         cropl = QtWidgets.QVBoxLayout(grp_crop)
         row_cap = QtWidgets.QHBoxLayout()
         row_cap.setSpacing(6)
-        row_cap.addWidget(self.capture_btn)      # appareil photo
-        row_cap.addWidget(self.son_btn)          # son, separe mais meme ligne
+        row_cap.addWidget(self.capture_btn)  # appareil photo
+        row_cap.addWidget(self.son_btn)  # son, separe mais meme ligne
         row_cap.addStretch(1)
         cropl.addLayout(row_cap)
         _cap_hint = QtWidgets.QLabel(
             "Appareil photo : le format et les options s'ouvrent dans une "
-            "fenêtre, puis choix du dossier d'enregistrement.")
+            "fenêtre, puis choix du dossier d'enregistrement."
+        )
         _cap_hint.setWordWrap(True)
         _cap_hint.setStyleSheet("color:#888; font-size:11px;")
         cropl.addWidget(_cap_hint)
@@ -2108,10 +2336,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # (état autoritatif des filtres, synchronisé avec les cases Hist/SIDECAR) ;
         # elles ne sont plus affichées dans Paramètres.
         self.filter_menu = QtWidgets.QMenu(self)
-        self.act_edges  = QtGui.QAction("Bords", self.filter_menu, checkable=True)
-        self.act_sharp  = QtGui.QAction("Nettete", self.filter_menu, checkable=True)
+        self.act_edges = QtGui.QAction("Bords", self.filter_menu, checkable=True)
+        self.act_sharp = QtGui.QAction("Nettete", self.filter_menu, checkable=True)
         self.act_invert = QtGui.QAction("Inverser", self.filter_menu, checkable=True)
-        self.act_clahe  = QtGui.QAction("CLAHE", self.filter_menu, checkable=True)
+        self.act_clahe = QtGui.QAction("CLAHE", self.filter_menu, checkable=True)
         for act in (self.act_edges, self.act_sharp, self.act_invert, self.act_clahe):
             act.triggered.connect(self.refresh_frame)
             self.filter_menu.addAction(act)
@@ -2121,8 +2349,8 @@ class MainWindow(QtWidgets.QMainWindow):
         cl3 = QtWidgets.QHBoxLayout(grp_cross)
         self.crosshair_chk = QtWidgets.QCheckBox("Afficher le réticule")
         self.crosshair_chk.setToolTip(
-            "Trace une croix au centre de l'image.\n"
-            "Utile pour l'alignement optique.")
+            "Trace une croix au centre de l'image.\nUtile pour l'alignement optique."
+        )
         self.crosshair_chk.toggled.connect(self._on_crosshair_changed)
         cl3.addWidget(self.crosshair_chk)
         cl3.addStretch(1)
@@ -2130,16 +2358,57 @@ class MainWindow(QtWidgets.QMainWindow):
 
         pv.addWidget(self._param_section_hdr("Global — toutes les vues / application"))
 
+        # --- Section : Affichage / interface ---
+        grp_disp = QtWidgets.QGroupBox("Affichage")
+        grp_disp.setObjectName("display_group")
+        dl = QtWidgets.QVBoxLayout(grp_disp)
+        dl.setSpacing(6)
+        self.info_bar_chk = QtWidgets.QCheckBox("Ligne d'infos sous chaque vue")
+        self.info_bar_chk.setObjectName("info_bar_check")
+        self.info_bar_chk.setToolTip(
+            "Fichier de la frame courante, taille, type de données, codec,\n"
+            "fps, position et horodatage (date du fichier ou temps vidéo)."
+        )
+        self.info_bar_chk.setChecked(True)
+        self.info_bar_chk.toggled.connect(self._on_info_bar_toggled)
+        dl.addWidget(self.info_bar_chk)
+        row_theme = QtWidgets.QHBoxLayout()
+        row_theme.addWidget(QtWidgets.QLabel("Thème :"))
+        self.theme_combo = QtWidgets.QComboBox()
+        self.theme_combo.setObjectName("theme_combo")
+        self.theme_combo.addItem("Sombre", "dark")
+        self.theme_combo.addItem("Clair", "light")
+        self.theme_combo.currentIndexChanged.connect(self._apply_theme)
+        row_theme.addWidget(self.theme_combo)
+        row_theme.addStretch(1)
+        dl.addLayout(row_theme)
+        row_ui = QtWidgets.QHBoxLayout()
+        _keys_btn = QtWidgets.QPushButton("Raccourcis clavier...")
+        _keys_btn.setObjectName("shortcuts_button")
+        _keys_btn.clicked.connect(self._edit_shortcuts)
+        row_ui.addWidget(_keys_btn)
+        _reset_btn = QtWidgets.QPushButton("Réinitialiser les réglages...")
+        _reset_btn.setObjectName("reset_settings_button")
+        _reset_btn.setToolTip(
+            "Remet l'interface par défaut : paramètres, thème, raccourcis,\n"
+            "position des panneaux. Les plugins et leurs données sont conservés."
+        )
+        _reset_btn.clicked.connect(self._reset_settings)
+        row_ui.addWidget(_reset_btn)
+        row_ui.addStretch(1)
+        dl.addLayout(row_ui)
+        pv.addWidget(grp_disp)
+
         # (Le format de capture et ses options sont désormais dans le popup de
         #  l'appareil photo, cf. _capture_frame — on gagne de la place ici.)
 
         # --- Section : Prefetch ---
-        grp_pref = QtWidgets.QGroupBox(
-            "Préchargement  (séquences images / SPECIALIZED)")
+        grp_pref = QtWidgets.QGroupBox("Préchargement  (séquences images / SPECIALIZED)")
         grp_pref.setToolTip(
             "Charge N frames en avance dans un thread de fond.\n"
             "Réduit les saccades en lecture réseau SSH.\n"
-            "Désactivé pour les vidéos MP4 (VideoCapture non thread-safe).")
+            "Désactivé pour les vidéos MP4 (VideoCapture non thread-safe)."
+        )
         pl = QtWidgets.QVBoxLayout(grp_pref)
         pl.setSpacing(6)
         row_pref = QtWidgets.QHBoxLayout()
@@ -2149,9 +2418,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.prefetch_spin.setValue(0)
         self.prefetch_spin.setFocusPolicy(Qt.StrongFocus)
         self.prefetch_spin.setToolTip(
-            "0 = désactivé.\n"
-            "4–8 : réseau rapide / LAN.\n"
-            "12–32 : SSH lent (plus de RAM utilisée).")
+            "0 = désactivé.\n4–8 : réseau rapide / LAN.\n12–32 : SSH lent (plus de RAM utilisée)."
+        )
         self.prefetch_spin.valueChanged.connect(self._on_prefetch_changed)
         row_pref.addWidget(self.prefetch_spin)
         row_pref.addStretch(1)
@@ -2162,21 +2430,6 @@ class MainWindow(QtWidgets.QMainWindow):
         pl.addWidget(self._prefetch_lbl)
         self._update_prefetch_info(0)
         pv.addWidget(grp_pref)
-
-        # --- Section : Journal des conversions (deplace ici depuis l'ancien
-        # onglet "Conversions", dont la place est reprise par l'onglet Plugins) ---
-        pv.addWidget(self._param_section_hdr("Conversions"))
-        grp_conv = QtWidgets.QGroupBox("Journal des conversions")
-        gcv = QtWidgets.QVBoxLayout(grp_conv)
-        self.convlog_list = QtWidgets.QListWidget()
-        self.convlog_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        self.convlog_list.setFocusPolicy(Qt.NoFocus)
-        self.convlog_list.setMaximumHeight(160)
-        gcv.addWidget(self.convlog_list)
-        _clr = QtWidgets.QPushButton("Effacer les terminées")
-        _clr.clicked.connect(self._convlog_clear_done)
-        gcv.addWidget(_clr)
-        pv.addWidget(grp_conv)
 
         pv.addStretch(1)
         _scroll = QtWidgets.QScrollArea()
@@ -2189,10 +2442,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # ── sync bidirectionnelle filtres ↔ contrôles Hist/SIDECAR (globaux) ──
         for act, chk in (
-            (self.act_edges,  self.flt_edges_chk),
-            (self.act_sharp,  self.flt_sharp_chk),
+            (self.act_edges, self.flt_edges_chk),
+            (self.act_sharp, self.flt_sharp_chk),
             (self.act_invert, self.flt_invert_chk),
-            (self.act_clahe,  self.flt_clahe_chk),
+            (self.act_clahe, self.flt_clahe_chk),
         ):
             act.toggled.connect(chk.setChecked)
             chk.toggled.connect(act.setChecked)
@@ -2200,10 +2453,8 @@ class MainWindow(QtWidgets.QMainWindow):
             # quand la case Hist/SIDECAR change l'action par code.
             chk.toggled.connect(self.refresh_frame)
         # ── sync LUT (bas de barre) ↔ LUT Hist/SIDECAR ──
-        self.lut_combo.currentIndexChanged.connect(
-            self.lut_hist_combo.setCurrentIndex)
-        self.lut_hist_combo.currentIndexChanged.connect(
-            self.lut_combo.setCurrentIndex)
+        self.lut_combo.currentIndexChanged.connect(self.lut_hist_combo.setCurrentIndex)
+        self.lut_hist_combo.currentIndexChanged.connect(self.lut_combo.setCurrentIndex)
 
     def _on_fetch_res_changed(self, _=None):
         scale = self.fetch_res_combo.currentData()
@@ -2217,9 +2468,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_fetch_res_info(self, scale):
         msgs = {
-            1.0:   "Pleine résolution — qualité maximale",
-            0.5:   "Moitié (4× moins) — réseau rapide",
-            0.25:  "Quart (16× moins) — SSH lent, qualité réduite",
+            1.0: "Pleine résolution — qualité maximale",
+            0.5: "Moitié (4× moins) — réseau rapide",
+            0.25: "Quart (16× moins) — SSH lent, qualité réduite",
             0.125: "Huitième (64× moins) — SSH très lent",
         }
         msg = msgs.get(scale, str(scale))
@@ -2233,8 +2484,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.overlays and self.overlay_chk.isChecked():
                 self.sidecar_logs.addItem(f"Frame {self.cur} : (pas d'overlay)")
             return
-        labels = [g["text"]["label"] for g in graphs
-                  if g.get("text") and g["text"].get("label")]
+        labels = [g["text"]["label"] for g in graphs if g.get("text") and g["text"].get("label")]
         if labels:
             for lab in labels:
                 self.sidecar_logs.addItem(f"Frame {self.cur}  -  {lab}")
@@ -2243,10 +2493,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _filter_flags(self):
         return {
-            "edges":   self.act_edges.isChecked(),
+            "edges": self.act_edges.isChecked(),
             "sharpen": self.act_sharp.isChecked(),
-            "invert":  self.act_invert.isChecked(),
-            "clahe":   self.act_clahe.isChecked(),
+            "invert": self.act_invert.isChecked(),
+            "clahe": self.act_clahe.isChecked(),
         }
 
     # ----- historique de sources -----
@@ -2285,9 +2535,7 @@ class MainWindow(QtWidgets.QMainWindow):
             c0 = f0[:, :, 0].astype(np.int32)
             c1 = f0[:, :, 1].astype(np.int32)
             c2 = f0[:, :, 2].astype(np.int32)
-            max_diff = max(np.abs(c0 - c1).mean(),
-                           np.abs(c1 - c2).mean(),
-                           np.abs(c0 - c2).mean())
+            max_diff = max(np.abs(c0 - c1).mean(), np.abs(c1 - c2).mean(), np.abs(c0 - c2).mean())
             # seuil tolerant : le bruit de compression (H.264/mp4v) sur une
             # video reellement grise induit deja des ecarts inter-canaux de
             # ~2-3 (mesure sur cas reel) -> 8.0 les absorbe sans confondre
@@ -2320,18 +2568,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._highlight_history()
 
     def _highlight_history(self):
-        cur_kind, cur_arg = (self._source_spec_from(self.source)
-                             if self.source else (None, None))
+        cur_kind, cur_arg = self._source_spec_from(self.source) if self.source else (None, None)
         for i, (name, kind, arg, bit_label, _is_color) in enumerate(self._history):
             item = self.hist_list.item(i)
             row = self.hist_list.itemWidget(item) if item is not None else None
             if row is None:
                 continue
-            is_active = (kind == cur_kind and arg == cur_arg)
-            star = "★ " if is_active else "  "
+            is_active = kind == cur_kind and arg == cur_arg
+            star = "> " if is_active else "  "
             row.label.setText(self._hist_row_text(name, kind, bit_label, star))
             row.setStyleSheet(
-                "background: rgba(220,60,60,60);" if is_active else "background: transparent;")
+                "background: rgba(220,60,60,60);" if is_active else "background: transparent;"
+            )
 
     def _history_path_at(self, row):
         """Chemin déposable pour l'entrée d'historique (pour le drag vers un bloc)."""
@@ -2419,7 +2667,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.extract_lbl.setToolTip(
             f"Zone IN→OUT de la vue sélectionnée : « {name} »\n"
             "L'extraction (bouton « Extraire… ») porte sur cette vue ;\n"
-            "le chemin de sortie est demandé au moment d'extraire.")
+            "le chemin de sortie est demandé au moment d'extraire."
+        )
 
     def _do_extract_clip(self):
         if self.source is None:
@@ -2427,14 +2676,15 @@ class MainWindow(QtWidgets.QMainWindow):
         s, e = self._extract_start, self._extract_end
         if s < 0 or e < 0 or e <= s:
             QtWidgets.QMessageBox.information(
-                self, "Extraction",
+                self,
+                "Extraction",
                 "D\xe9finissez d'abord :\n"
                 "  [  IN  \u2192 marque la frame de d\xe9but\n"
                 "  OUT ]  \u2192 marque la frame de fin\n\n"
-                "Astuce : activer la boucle (\u21ba) pour pr\xe9visualiser la zone.")
+                "Astuce : activer la boucle (\u21ba) pour pr\xe9visualiser la zone.",
+            )
             return
-        dlg = ClipExtractDialog(self, s, e, crop_rect=self._current_crop_rect())
-        dlg.exec()
+        self._show_export_dialog(ClipExtractDialog(self, s, e, crop_rect=self._current_crop_rect()))
 
     # ──── ROI d'export (crop vert) ───────────────────────────────
     def _current_crop_rect(self):
@@ -2453,8 +2703,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.view.set_tool_mode("roi")
             if self._roi is None:
                 self.status.showMessage(
-                    "Trace un rectangle vert dans la vue : seule cette zone sera exportée.",
-                    5000)
+                    "Trace un rectangle vert dans la vue : seule cette zone sera exportée.", 5000
+                )
         self._update_extract_lbl()
 
     # ──── splitting : morceaux multiples ─────────────────────────
@@ -2462,8 +2712,10 @@ class MainWindow(QtWidgets.QMainWindow):
         s, e = self._extract_start, self._extract_end
         if s < 0 or e < 0 or e <= s:
             QtWidgets.QMessageBox.information(
-                self, "Ajouter un morceau",
-                "Définis d'abord IN puis OUT (OUT > IN) avant d'ajouter un morceau.")
+                self,
+                "Ajouter un morceau",
+                "Définis d'abord IN puis OUT (OUT > IN) avant d'ajouter un morceau.",
+            )
             return
         self._segments.append((int(s), int(e)))
         # reinitialise IN/OUT pour enchainer le morceau suivant
@@ -2503,11 +2755,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _open_split_extract(self):
         if self.source is None or not self._segments:
             QtWidgets.QMessageBox.information(
-                self, "Extraire les morceaux",
-                "Ajoute d'abord au moins un morceau (IN→OUT puis « Ajouter morceau »).")
+                self,
+                "Extraire les morceaux",
+                "Ajoute d'abord au moins un morceau (IN→OUT puis « Ajouter morceau »).",
+            )
             return
-        dlg = SplitExtractDialog(self, self._segments, self._current_crop_rect())
-        dlg.exec()
+        self._show_export_dialog(
+            SplitExtractDialog(self, self._segments, self._current_crop_rect())
+        )
 
     # ──── reticule ───────────────────────────────────────────────
     def _on_crosshair_changed(self, on):
@@ -2542,11 +2797,14 @@ class MainWindow(QtWidgets.QMainWindow):
         n = self._prefetch_n
         if n <= 0 or self.source is None:
             return
-        if hasattr(self.source, 'path') and not hasattr(self.source, 'paths'):
+        if hasattr(self.source, "path") and not hasattr(self.source, "paths"):
             return
         total = self.source.count
-        indices = [i for i in range(base_idx + 1, min(base_idx + n + 1, total))
-                   if i not in self._prefetch_cache]
+        indices = [
+            i
+            for i in range(base_idx + 1, min(base_idx + n + 1, total))
+            if i not in self._prefetch_cache
+        ]
         if not indices:
             return
         self._stop_prefetch()
@@ -2556,30 +2814,45 @@ class MainWindow(QtWidgets.QMainWindow):
         t.start()
 
     def _on_prefetch_done(self, cache):
+        sender = self.sender()
+        if sender is not None and sender is not self._prefetch_thread:
+            # resultat d'un thread arrete entre-temps (autre source, autre
+            # echelle) : ses frames n'appartiennent plus a la source courante.
+            return
         self._prefetch_cache.update(cache)
         max_cached = max(self._prefetch_n * 3, 8)
         while len(self._prefetch_cache) > max_cached:
             del self._prefetch_cache[min(self._prefetch_cache)]
+        self._retire_prefetch(self._prefetch_thread)
         self._prefetch_thread = None
 
     def _stop_prefetch(self):
         if self._prefetch_thread is not None:
             self._prefetch_thread.stop()
+            self._retire_prefetch(self._prefetch_thread)
             self._prefetch_thread = None
+
+    def _retire_prefetch(self, thread):
+        if thread is None or not thread.isRunning():
+            return
+        self._prefetch_retired.add(thread)
+        thread.finished.connect(lambda t=thread: self._prefetch_retired.discard(t))
 
     def _apply_rotation(self, frame):
         if frame is None or self._rotation == 0:
             return frame
-        codes = {90: cv2.ROTATE_90_CLOCKWISE,
-                 180: cv2.ROTATE_180,
-                 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+        codes = {
+            90: cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+        }
         code = codes.get(self._rotation)
         return cv2.rotate(frame, code) if code is not None else frame
 
     def _rotate_90(self):
         self._rotation = (self._rotation + 90) % 360
         lbl = f" {self._rotation}°" if self._rotation else ""
-        self.rot_btn.setText(f"↻ Rot.{lbl}")
+        self.rot_btn.setText(f"Rot.{lbl}")
         self.refresh_frame()
 
     def _toggle_vid_rec(self, checked=False):
@@ -2590,8 +2863,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.vid_rec_btn.blockSignals(False)
                 return
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self, self._tr("Enregistrer la lecture vidéo..."),
-                "capture.mp4", "Video MP4 (*.mp4)")
+                self,
+                self._tr("Enregistrer la lecture vidéo..."),
+                "capture.mp4",
+                "Video MP4 (*.mp4)",
+            )
             if not path:
                 self.vid_rec_btn.blockSignals(True)
                 self.vid_rec_btn.setChecked(False)
@@ -2610,13 +2886,15 @@ class MainWindow(QtWidgets.QMainWindow):
             if not self._vid_recorder.isOpened():
                 self._vid_recorder = None
                 QtWidgets.QMessageBox.warning(
-                    self, "Erreur", "Impossible d'ouvrir le fichier vidéo.")
+                    self, "Erreur", "Impossible d'ouvrir le fichier vidéo."
+                )
                 self.vid_rec_btn.blockSignals(True)
                 self.vid_rec_btn.setChecked(False)
                 self.vid_rec_btn.blockSignals(False)
                 return
             self._vid_rec_path = path
-            set_ui_text(self.vid_rec_btn, "⏹ Stop")
+            set_ui_text(self.vid_rec_btn, " Stop")
+            self.vid_rec_btn.setIcon(icons.icon("stop"))
             self.status.showMessage(f"Enregistrement → {path}", 0)
         else:
             self._stop_vid_rec()
@@ -2626,28 +2904,29 @@ class MainWindow(QtWidgets.QMainWindow):
             self._vid_recorder.release()
             self._vid_recorder = None
             if hasattr(self, "status"):
-                self.status.showMessage(
-                    f"Vidéo enregistrée → {self._vid_rec_path}", 5000)
+                self.status.showMessage(f"Vidéo enregistrée → {self._vid_rec_path}", 5000)
         if hasattr(self, "vid_rec_btn"):
             self.vid_rec_btn.blockSignals(True)
             self.vid_rec_btn.setChecked(False)
             self.vid_rec_btn.blockSignals(False)
-            set_ui_text(self.vid_rec_btn, "⏺ Vidéo")
+            set_ui_text(self.vid_rec_btn, " Vidéo")
+            self.vid_rec_btn.setIcon(icons.icon("record"))
 
     def _capture_frame(self):
         if self._raw is None:
             return
         fmt, with_overlays = self._ask_capture_options()
         if fmt is None:
-            return   # annule
+            return  # annule
         raw_rot = self._apply_rotation(self._raw)
         if fmt == "tiff16":
             data = raw_rot
             default = f"frame_{self.cur:05d}.tiff"
             filt = "TIFF (*.tiff *.tif)"
         else:
-            data = (self._export_frame_as_viewed(self.cur) if with_overlays
-                    else self.process(raw_rot))
+            data = (
+                self._export_frame_as_viewed(self.cur) if with_overlays else self.process(raw_rot)
+            )
             if data is None:
                 return
             default = f"frame_{self.cur:05d}.png"
@@ -2657,12 +2936,15 @@ class MainWindow(QtWidgets.QMainWindow):
         if crop is not None and data is not None:
             H, W = data.shape[:2]
             x, y, w, h = crop
-            x = max(0, min(int(x), W - 1)); y = max(0, min(int(y), H - 1))
-            x2 = min(W, x + int(w)); y2 = min(H, y + int(h))
+            x = max(0, min(int(x), W - 1))
+            y = max(0, min(int(y), H - 1))
+            x2 = min(W, x + int(w))
+            y2 = min(H, y + int(h))
             if x2 > x and y2 > y:
                 data = data[y:y2, x:x2]
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, self._tr("Enregistrer la capture..."), default, filt)
+            self, self._tr("Enregistrer la capture..."), default, filt
+        )
         if not path:
             return
         ok = cv2.imwrite(path, data)
@@ -2702,6 +2984,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 hint.setText("Image affichée (LUT + filtres). Les calques sont gravés si coché.")
                 chk.setEnabled(True)
+
         combo.currentIndexChanged.connect(_upd)
         _upd()
 
@@ -2727,8 +3010,8 @@ class MainWindow(QtWidgets.QMainWindow):
         on = self._view_only
         if on:
             self._dock_vis_save = {
-                d: d.isVisible()
-                for d in self.findChildren(QtWidgets.QDockWidget)}
+                d: d.isVisible() for d in self.findChildren(QtWidgets.QDockWidget)
+            }
             for d in self._dock_vis_save:
                 d.hide()
             for tb in self.findChildren(QtWidgets.QToolBar):
@@ -2746,8 +3029,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._ctrl_widget.show()
             self.statusBar().show()
             self._update_right_btns(
-                self.right_tab.currentIndex()
-                if self.right_dock.isVisible() else -1)
+                self.right_tab.currentIndex() if self.right_dock.isVisible() else -1
+            )
 
     def _exit_fullscreen(self):
         if self._view_only:
@@ -2773,8 +3056,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.son_btn.setIcon(icons.icon("speaker" if enabled else "speaker_muted"))
         if enabled and self.timer.isActive():
             fps_src = getattr(self.source, "fps", self.fps_spin.value() or 25.0)
-            self._audio_player.setPosition(
-                int(self.cur * 1000.0 / max(fps_src, 0.001)))
+            self._audio_player.setPosition(int(self.cur * 1000.0 / max(fps_src, 0.001)))
             self._audio_player.play()
         elif not enabled:
             self._audio_player.pause()
@@ -2791,23 +3073,28 @@ class MainWindow(QtWidgets.QMainWindow):
         browser.setOpenExternalLinks(False)
         browser.setStyleSheet(
             "QTextBrowser{background:#15151a; border:1px solid #2a2a32; "
-            "border-radius:6px; padding:4px;}")
+            "border-radius:6px; padding:4px;}"
+        )
 
         def sec(title, color, rows, icon=""):
             """Un bloc titre coloré + tableau raccourci/description."""
             title = tr(title)
-            head = (f'<div style="margin:14px 0 6px 0;padding:4px 10px;'
-                     f'border-left:4px solid {color};background:{color}22;'
-                     f'border-radius:3px;">'
-                     f'<span style="color:{color};font-size:14px;font-weight:bold;">'
-                     f'{icon} {title}</span></div>')
-            body = ('<table cellspacing="0" cellpadding="3" width="100%">')
+            head = (
+                f'<div style="margin:14px 0 6px 0;padding:4px 10px;'
+                f"border-left:4px solid {color};background:{color}22;"
+                f'border-radius:3px;">'
+                f'<span style="color:{color};font-size:14px;font-weight:bold;">'
+                f"{icon} {title}</span></div>"
+            )
+            body = '<table cellspacing="0" cellpadding="3" width="100%">'
             for k, v in rows:
                 k, v = tr(k), tr(v)
-                body += (f'<tr><td style="color:{color};font-family:Consolas,monospace;'
-                         f'white-space:nowrap;padding-right:14px;vertical-align:top;">'
-                         f'<b>{k}</b></td>'
-                         f'<td style="color:#dddde3;">{v}</td></tr>')
+                body += (
+                    f'<tr><td style="color:{color};font-family:Consolas,monospace;'
+                    f'white-space:nowrap;padding-right:14px;vertical-align:top;">'
+                    f"<b>{k}</b></td>"
+                    f'<td style="color:#dddde3;">{v}</td></tr>'
+                )
             body += "</table>"
             return head + body
 
@@ -2822,80 +3109,189 @@ class MainWindow(QtWidgets.QMainWindow):
         <div style="color:#e8e8ee; font-family:Segoe UI, Arial, sans-serif; font-size:12px;">
         <h2 style="color:#5aafff; margin-bottom:2px;">{tr("FrameViewer — Aide complète")}</h2>
         <p style="color:#9a9aa5;">{tr("Souris, clavier, outils, calques, multivue et export — tout ce que fait l'application.")}</p>
+        <p style="color:#6a6a75;">Version {__version__}</p>
         """
 
-        html += sec("Souris — vue / canvas", "#5aafff", [
-            ("Clic gauche (vue inactive)", "Active cette vue (outils TI + histogramme s'y rattachent)."),
-            ("Clic gauche + glisser (outil ROI)", "Trace un rectangle de sélection (ROI)."),
-            ("Clic gauche simple (outil ROI)", "Sur une boîte .ver : démarre le <b>suivi</b> automatique de "
-                "cette boîte. Sur une autre boîte : change de suivi. Dans le vide : annule le suivi."),
-            ("Clic gauche simple (REC clics actif)", "Enregistre un clic (frame, x, y) dans le fichier de clics."),
-            ("Clic gauche + glisser (outil ligne)", "Trace un profil de ligne."),
-            ("Clic gauche (outil règle)", "Ajoute un point à la polyligne de mesure."),
-            ("Clic droit (outil règle)", "Réinitialise la polyligne de mesure."),
-            ("Clic droit + glisser (bandeau [n])", "Échange le contenu de deux vues."),
-            ("Double-clic (vue)", "Plein écran de cette vue / retour à la disposition normale."),
-            ("Molette", "Zoom avant/arrière, centré sur le curseur."),
-            ("Clic molette + glisser", "Panoramique dans une vue zoomée."),
-            ("Clic molette (sans glisser)", "Réajuste la vue (fit, zoom 1×)."),
-            ("Glisser un fichier / dossier sur une vue", "Ouvre cette séquence dans cette vue "
-                "(un dossier de liens symboliques vers des images est accepté, même sans extension)."),
-            ("Glisser un .sidecar / .ver sur une vue", "Ajoute ce calque à cette vue (l'active si besoin)."),
-            ("Glisser le curseur de frame d'une vue inactive", "Cette vue devient active dès le relâchement."),
-        ], "🖱️")
+        html += sec(
+            "Souris — vue / canvas",
+            "#5aafff",
+            [
+                (
+                    "Clic gauche (vue inactive)",
+                    "Active cette vue (outils TI + histogramme s'y rattachent).",
+                ),
+                ("Clic gauche + glisser (outil ROI)", "Trace un rectangle de sélection (ROI)."),
+                (
+                    "Clic gauche simple (outil ROI)",
+                    "Sur une boîte .ver : démarre le <b>suivi</b> automatique de "
+                    "cette boîte. Sur une autre boîte : change de suivi. Dans le vide : annule le suivi.",
+                ),
+                (
+                    "Clic gauche simple (REC clics actif)",
+                    "Enregistre un clic (frame, x, y) dans le fichier de clics.",
+                ),
+                ("Clic gauche + glisser (outil ligne)", "Trace un profil de ligne."),
+                ("Clic gauche (outil règle)", "Ajoute un point à la polyligne de mesure."),
+                ("Clic droit (outil règle)", "Réinitialise la polyligne de mesure."),
+                ("Clic droit + glisser (bandeau [n])", "Échange le contenu de deux vues."),
+                (
+                    "Double-clic (vue)",
+                    "Plein écran de cette vue / retour à la disposition normale.",
+                ),
+                ("Molette", "Zoom avant/arrière, centré sur le curseur."),
+                ("Clic molette + glisser", "Panoramique dans une vue zoomée."),
+                ("Clic molette (sans glisser)", "Réajuste la vue (fit, zoom 1×)."),
+                (
+                    "Glisser un fichier / dossier sur une vue",
+                    "Ouvre cette séquence dans cette vue "
+                    "(un dossier de liens symboliques vers des images est accepté, même sans extension).",
+                ),
+                (
+                    "Glisser un .sidecar / .ver sur une vue",
+                    "Ajoute ce calque à cette vue (l'active si besoin).",
+                ),
+                (
+                    "Glisser le curseur de frame d'une vue inactive",
+                    "Cette vue devient active dès le relâchement.",
+                ),
+            ],
+            "",
+        )
 
-        html += sec("Outils TI (panneau accordéon)", "#7fd858", [
-            ("ROI — sélection / mesures", "Zoom du crop + histogramme + statistiques (min/max/moyenne/σ/"
-                "médiane). Bouton <b>Convertir…</b> : exporte le crop fixe ou suivi sur toute la "
-                "séquence dans les formats actifs, avec padding réglable et heatmap d'histogrammes en option."),
-            ("FFT 2D", "Spectre de Fourier 2D (magnitude, log) de la ROI courante — texture/périodicité."),
-            ("Profil de ligne", "Trace le profil d'intensité le long d'une ligne ; export CSV."),
-            ("Règle", "Distance et angle entre points cliqués (polyligne)."),
-            ("Soustraction temporelle", "Affiche |frame N − frame N−k| pour révéler mouvements/variations."),
-        ], "🧰")
+        html += sec(
+            "Outils TI (panneau accordéon)",
+            "#7fd858",
+            [
+                (
+                    "ROI — sélection / mesures",
+                    "Zoom du crop + histogramme + statistiques (min/max/moyenne/σ/"
+                    "médiane). Bouton <b>Convertir…</b> : exporte le crop fixe ou suivi sur toute la "
+                    "séquence dans les formats actifs, avec padding réglable et heatmap d'histogrammes en option.",
+                ),
+                (
+                    "FFT 2D",
+                    "Spectre de Fourier 2D (magnitude, log) de la ROI courante — texture/périodicité.",
+                ),
+                (
+                    "Profil de ligne",
+                    "Trace le profil d'intensité le long d'une ligne ; export CSV.",
+                ),
+                ("Règle", "Distance et angle entre points cliqués (polyligne)."),
+                (
+                    "Soustraction temporelle",
+                    "Affiche |frame N − frame N−k| pour révéler mouvements/variations.",
+                ),
+            ],
+            "",
+        )
 
-        html += sec("Calques — SIDECAR / .ver", "#ff9a3d", [
-            ("Case à cocher d'un calque", "Affiche / masque ce calque (overlay SIDECAR ou boîtes .ver d'un track)."),
-            ("Tout / Aucun", "Coche / décoche tous les calques de la vue active d'un coup."),
-            ("Suppr.", "Supprime les calques sélectionnés dans la liste (multi-sélection, touche Suppr)."),
-            ("Vider calques", "Supprime TOUS les calques (SIDECAR + .ver) de la vue active, en un clic."),
-            ("« Afficher les overlays »", "Interrupteur général : masque tout, même si des calques sont cochés."),
-        ], "📋")
+        html += sec(
+            "Calques — SIDECAR / .ver",
+            "#ff9a3d",
+            [
+                (
+                    "Case à cocher d'un calque",
+                    "Affiche / masque ce calque (overlay SIDECAR ou boîtes .ver d'un track).",
+                ),
+                ("Tout / Aucun", "Coche / décoche tous les calques de la vue active d'un coup."),
+                (
+                    "Suppr.",
+                    "Supprime les calques sélectionnés dans la liste (multi-sélection, touche Suppr).",
+                ),
+                (
+                    "Vider calques",
+                    "Supprime TOUS les calques (SIDECAR + .ver) de la vue active, en un clic.",
+                ),
+                (
+                    "« Afficher les overlays »",
+                    "Interrupteur général : masque tout, même si des calques sont cochés.",
+                ),
+            ],
+            "",
+        )
 
-        html += sec("Multivue / Fusion", "#c98bff", [
-            ("Bandeau [1] [2] …", "Sélectionne/active la vue correspondante."),
-            ("⇄ (haut-droit de chaque vue)", "Convertit cette vue (menu de formats, calques/contraste inclus)."),
-            ("🔗 Lier", "Ouvre le réglage des frames de départ puis synchronise frame, zoom et "
-                "pan. Les écarts sont conservés au scrub, au pas-à-pas et en lecture. La plage commune "
-                "empêche une vue d'arriver silencieusement en fin de source."),
-            ("Mode Fusion", "Glisser une 2ᵉ source en haut-droite ; régler α ou le mode de mélange "
-                "(alpha, addition pondérée, différence, damier) ; ⤓ Extraire récupère le rendu fusionné."),
-            ("Mode Temporel (i-N | i)", "Même flux affiché à deux instants : la frame <b>i-N</b> à gauche "
-                "(vue figée « Past Frame », bandeau vert clair) et la frame courante <b>i</b> à droite "
-                "(vue moteur, bord vert). Réglez <b>N</b> dans la barre d'outils. Idéal pour comparer une "
-                "frame à son passé (mouvement, dérive)."),
-            ("Inter-connexion inter-vues", "Automatique dès qu'un plugin la fournit (aucun bouton) : ronds "
-                "+ traits colorés reliant des points appariés entre deux vues (ex. keypoints i-N ↔ i, ou "
-                "matching SIFT seq1 ↔ seq2). Voir les plugins <i>demo_2_multivue_kpts</i> / "
-                "<i>demo_4_multivue_kpts</i>."),
-            ("Convertir (toutes les vues)", "En multivue : assemble un MP4 de la disposition actuelle "
-                "(grille ou fusion), calques et contraste inclus."),
-        ], "🪟")
+        html += sec(
+            "Multivue / Fusion",
+            "#c98bff",
+            [
+                ("Bandeau [1] [2] …", "Sélectionne/active la vue correspondante."),
+                (
+                    "Convertir (haut-droit de chaque vue)",
+                    "Convertit cette vue (menu de formats, calques/contraste inclus).",
+                ),
+                (
+                    "Lier",
+                    "Ouvre le réglage des frames de départ puis synchronise frame, zoom et "
+                    "pan. Les écarts sont conservés au scrub, au pas-à-pas et en lecture. La plage commune "
+                    "empêche une vue d'arriver silencieusement en fin de source.",
+                ),
+                (
+                    "Mode Fusion",
+                    "Glisser une 2ᵉ source en haut-droite ; régler α ou le mode de mélange "
+                    "(alpha, addition pondérée, différence, damier, rideau A/B) ; Extraire récupère le rendu fusionné.",
+                ),
+                (
+                    "Mode Temporel (i-N | i)",
+                    "Même flux affiché à deux instants : la frame <b>i-N</b> à gauche "
+                    "(vue figée « Past Frame », bandeau vert clair) et la frame courante <b>i</b> à droite "
+                    "(vue moteur, bord vert). Réglez <b>N</b> dans la barre d'outils. Idéal pour comparer une "
+                    "frame à son passé (mouvement, dérive).",
+                ),
+                (
+                    "Inter-connexion inter-vues",
+                    "Automatique dès qu'un plugin la fournit (aucun bouton) : ronds "
+                    "+ traits colorés reliant des points appariés entre deux vues (ex. keypoints i-N ↔ i, ou "
+                    "matching SIFT seq1 ↔ seq2). Voir les plugins <i>demo_2_multivue_kpts</i> / "
+                    "<i>demo_4_multivue_kpts</i>.",
+                ),
+                (
+                    "Convertir (toutes les vues)",
+                    "En multivue : assemble un MP4 de la disposition actuelle "
+                    "(grille ou fusion), calques et contraste inclus.",
+                ),
+            ],
+            "",
+        )
 
-        html += sec("Formats média détectés", "#64d8cb", [
-            ("Disponibles dans cette installation", media_text),
-            ("Dossier d'images", "Les fichiers sont triés dans l'ordre naturel, sans parcours récursif."),
-            ("Formats optionnels", "Ils n'apparaissent ici que si leur adaptateur backend est réellement chargé."),
-        ], "📁")
+        html += sec(
+            "Formats média détectés",
+            "#64d8cb",
+            [
+                ("Disponibles dans cette installation", media_text),
+                (
+                    "Dossier d'images",
+                    "Les fichiers sont triés dans l'ordre naturel, sans parcours récursif.",
+                ),
+                (
+                    "Formats optionnels",
+                    "Ils n'apparaissent ici que si leur adaptateur backend est réellement chargé.",
+                ),
+            ],
+            "",
+        )
 
-        html += sec("Annotations YOLO / .ver", "#ff9a3d", [
-            ("Association prioritaire", "Même nom de base : <b>images/frame_05000.png</b> ↔ "
-                "<b>labels/frame_05000.txt</b>, sans tenir compte de la casse."),
-            ("Repli", "Si aucun nom ne correspond, association par ordre naturel. Les labels sans image "
-                "correspondante sont signalés dans la barre de statut."),
-            ("classes.txt", "Optionnel, adjacent au dossier de labels, une classe par ligne. Dans la "
-                "démonstration, la classe 0 se nomme <b>vehicle</b>."),
-        ], "▣")
+        html += sec(
+            "Annotations YOLO / .ver",
+            "#ff9a3d",
+            [
+                (
+                    "Association prioritaire",
+                    "Même nom de base : <b>images/frame_05000.png</b> ↔ "
+                    "<b>labels/frame_05000.txt</b>, sans tenir compte de la casse.",
+                ),
+                (
+                    "Repli",
+                    "Si aucun nom ne correspond, association par ordre naturel. Les labels sans image "
+                    "correspondante sont signalés dans la barre de statut.",
+                ),
+                (
+                    "classes.txt",
+                    "Optionnel, adjacent au dossier de labels, une classe par ligne. Dans la "
+                    "démonstration, la classe 0 se nomme <b>vehicle</b>.",
+                ),
+            ],
+            "",
+        )
 
         html += f"""
         <div style="margin:8px 0;color:#dddde3;">
@@ -2921,33 +3317,40 @@ labels/frame_05000.txt
         </div>
         """
 
-        html += sec("Export / Conversion", "#ff6b6b", [
-            ("Extraire… (IN → OUT)", "Formats vidéo, dossiers d'images et formats optionnels actifs. Case "
-                "« tel qu'affiché » : grave calques + contraste dans l'export."),
-            ("Convertir (bouton par vue / barre du bas)", "Même export, sur toute la séquence de cette source."),
-            ("📷 Capture", "Capture la frame courante en PNG (avec ou sans calques, au choix)."),
-        ], "🎬")
+        html += sec(
+            "Export / Conversion",
+            "#ff6b6b",
+            [
+                (
+                    "Extraire… (IN → OUT)",
+                    "Formats vidéo, dossiers d'images et formats optionnels actifs. Case "
+                    "« tel qu'affiché » : grave calques + contraste dans l'export.",
+                ),
+                (
+                    "Convertir (bouton par vue / barre du bas)",
+                    "Même export, sur toute la séquence de cette source.",
+                ),
+                (
+                    "Capture",
+                    "Capture la frame courante en PNG (avec ou sans calques, au choix).",
+                ),
+            ],
+            "",
+        )
 
-        html += sec("Clavier", "#ffd166", [
-            ("← / →", "Frame précédente / suivante."),
-            ("Espace", "Lecture / pause."),
-            ("Origine (Home) / Fin (End)", "Première / dernière frame."),
+        key_rows = [
+            (keys_label(self._shortcut_map.get(aid, defaults)), label)
+            for aid, label, defaults, _kind in SHORTCUT_ACTIONS
+        ]
+        key_rows += [
             ("Chiffres puis Entrée", "Aller directement à la frame N."),
-            ("+ / -", "Zoom avant / arrière."),
-            ("Ctrl+O", "Ouvrir un fichier."),
-            ("Ctrl+Maj+O", "Ouvrir un dossier."),
-            ("Ctrl+S", "Sauvegarder les clics enregistrés."),
-            ("Ctrl+Z", "Annuler le dernier clic."),
-            ("Suppr", "Effacer tous les clics enregistrés."),
-            ("Ctrl+R", "Rotation 90° horaire."),
-            ("Ctrl+E", "Capturer la frame courante en PNG."),
-            ("Ctrl+C", "Copier la frame dans le presse-papiers."),
-            ("F11", "Vue plein cadre (masque toute l'interface)."),
+            ("Suppr", "Retirer les calques / sources d'historique sélectionnés."),
             ("Échap", "Quitter le plein cadre."),
-        ], "⌨️")
+        ]
+        html += sec("Clavier (modifiable dans Paramètres)", "#ffd166", key_rows)
 
         html += "</div>"
-        browser.setHtml(html)
+        browser.setHtml(themed_html(html))
 
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.setContentsMargins(10, 10, 10, 10)
@@ -2962,16 +3365,47 @@ labels/frame_05000.txt
     def _shortcuts(self):
         # Navigation (fleches), zoom (+/-) et saisie de frame sont geres dans
         # keyPressEvent pour fiabilite (les QShortcut sur fleches etaient captes
-        # par les champs de saisie). Ici: uniquement les combinaisons Ctrl.
-        def sc(seq, fn):
-            QtGui.QShortcut(QtGui.QKeySequence(seq), self, activated=fn)
-        sc("Ctrl+O", self.open_file_dialog)
-        sc("Ctrl+Shift+O", self.open_dir_dialog)
-        sc("Ctrl+S", self.save_clicks_as)
-        sc("Ctrl+Z", self.undo_click)
-        sc("Ctrl+R", self._rotate_90)
-        sc("Ctrl+E", self._capture_frame)
-        sc("Ctrl+C", self._copy_to_clipboard)
+        # par les champs de saisie). Ici : les actions "global" (Ctrl+..., F11),
+        # touches choisies par l'utilisateur (ui/shortcuts.py).
+        for sc in self._qshortcuts:
+            sc.setEnabled(False)
+            sc.deleteLater()
+        self._qshortcuts = install_global_shortcuts(
+            self,
+            self._shortcut_map,
+            {
+                "open_file": self.open_file_dialog,
+                "open_folder": self.open_dir_dialog,
+                "save_clicks": self.save_clicks_as,
+                "undo_click": self.undo_click,
+                "rotate": self._rotate_90,
+                "capture": self._capture_frame,
+                "copy_frame": self._copy_to_clipboard,
+                "view_only": self._toggle_view_only,
+                "panel_hist": lambda: self._show_right_tab_page(self.side_split),
+                "panel_plugins": lambda: self._show_right_tab_page(self._plugins_page),
+                "panel_params": lambda: self._show_right_tab_page(self.params_scroll),
+                "toggle_tools": self.tools_btn.click,
+                "toggle_history": self.hist_btn.click,
+                "help": self._show_aide,
+            },
+        )
+
+    def _nav_action(self, event):
+        """Action de navigation ("step_back", "play_pause"...) liee a la touche."""
+        for aid in NAV_ACTIONS:
+            if event_matches(event, self._shortcut_map.get(aid, ())):
+                return aid
+        return None
+
+    def _edit_shortcuts(self):
+        dlg = ShortcutsDialog(self._shortcut_map, self)
+        if dlg.exec() != QtWidgets.QDialog.Accepted:
+            return
+        self._shortcut_map = dlg.mapping()
+        save_shortcuts(self._plugin_settings(), self._shortcut_map)
+        self._shortcuts()
+        self.status.showMessage("Raccourcis clavier enregistrés.", 3000)
 
     def keyPressEvent(self, e):
         k = e.key()
@@ -2980,13 +3414,17 @@ labels/frame_05000.txt
         # touches doivent marcher meme quand le moteur (vue principale) est vide.
         tgt = self._kbd_target
         sat_tgt = tgt if tgt not in ("engine", "all") else None
+        action = self._nav_action(e)
         if self.source is None:
-            if (sat_tgt is not None and sat_tgt.has_source()
-                    and k in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Space)):
+            if (
+                sat_tgt is not None
+                and sat_tgt.has_source()
+                and action in ("step_back", "step_forward", "play_pause")
+            ):
                 self._frame_buf = ""
-                if k == Qt.Key_Left:
+                if action == "step_back":
                     self._route_step(-1)
-                elif k == Qt.Key_Right:
+                elif action == "step_forward":
                     self._route_step(1)
                 else:
                     self._route_play_toggle()
@@ -3007,23 +3445,21 @@ labels/frame_05000.txt
                 self.seek(min(int(self._frame_buf), max(0, self.source.count - 1)))
             self._frame_buf = ""
             return
-        self._frame_buf = ""           # toute autre touche annule la saisie
-        if k == Qt.Key_Left:
+        self._frame_buf = ""  # toute autre touche annule la saisie
+        if action == "step_back":
             self._route_step(-1)
-        elif k == Qt.Key_Right:
+        elif action == "step_forward":
             self._route_step(1)
-        elif k == Qt.Key_Space:
+        elif action == "play_pause":
             self._route_play_toggle()
-        elif k == Qt.Key_Home:
+        elif action == "first_frame":
             self.seek(0)
-        elif k == Qt.Key_End:
+        elif action == "last_frame":
             self._go_last()
-        elif k in (Qt.Key_Plus, Qt.Key_Equal):
+        elif action == "zoom_in":
             self.view.zoom_in()
-        elif k == Qt.Key_Minus:
+        elif action == "zoom_out":
             self.view.zoom_out()
-        elif k == Qt.Key_F11:
-            self._toggle_view_only()
         elif k == Qt.Key_Escape:
             if self._view_only:
                 self._toggle_view_only()
@@ -3038,19 +3474,29 @@ labels/frame_05000.txt
             super().keyPressEvent(e)
 
     def _enable_playback(self, on):
-        for w in (self.play_btn, self.first_btn, self.prev_btn, self.next_btn,
-                  self.last_btn, self.slider, self.frame_spin, self.rec_btn,
-                  self.undo_btn, self.clear_btn, self.capture_btn,
-                  self.extract_in_btn, self.extract_out_btn,
-                  self.extract_clip_btn):
+        for w in (
+            self.play_btn,
+            self.first_btn,
+            self.prev_btn,
+            self.next_btn,
+            self.last_btn,
+            self.slider,
+            self.frame_spin,
+            self.rec_btn,
+            self.undo_btn,
+            self.clear_btn,
+            self.capture_btn,
+            self.extract_in_btn,
+            self.extract_out_btn,
+            self.extract_clip_btn,
+        ):
             w.setEnabled(on)
 
     # ----- annotations overlay -----
 
     def _load_dropped_annotations(self, path):
         if not _HAS_ANNOT:
-            QtWidgets.QMessageBox.warning(
-                self, "Annotations", "annotation_loader.py manquant.")
+            QtWidgets.QMessageBox.warning(self, "Annotations", "annotation_loader.py manquant.")
             return
         w = h = 0
         if self._raw is not None:
@@ -3061,11 +3507,13 @@ labels/frame_05000.txt
             # de l'image pour les convertir en pixels, sinon chaque boite
             # devient silencieusement (0,0,1,1) (voir _yolo_norm_to_pixel).
             QtWidgets.QMessageBox.warning(
-                self, "Annotations",
+                self,
+                "Annotations",
                 "Ouvre d'abord la séquence correspondante sur cette vue : "
                 "les coordonnées YOLO sont normalisées (0..1) et ont "
                 "besoin des dimensions de l'image pour être converties "
-                "en pixels.")
+                "en pixels.",
+            )
             return
         # default_track n'est utilisé QUE si le fichier ne fournit pas sa
         # propre colonne track_id (format .ver court, 6 colonnes). Les
@@ -3083,24 +3531,26 @@ labels/frame_05000.txt
         try:
             new = _load_annotations(path, w, h, default_track=default_track)
         except Exception as ex:
-            QtWidgets.QMessageBox.warning(
-                self, "Annotations", f"Erreur chargement : {ex}")
+            QtWidgets.QMessageBox.warning(self, "Annotations", f"Erreur chargement : {ex}")
             return
         self._apply_loaded_annotations(path, new, is_yolo, default_track)
 
     def _start_annot_folder_load(self, path, w, h, default_track):
         self._stop_annot_load()
         self.statusBar().showMessage(
-            f"Chargement des annotations en arrière-plan…  ({os.path.basename(path)})", 0)
+            f"Chargement des annotations en arrière-plan…  ({os.path.basename(path)})", 0
+        )
         t = AnnotFolderLoadWorker(path, w, h, default_track=default_track)
-        t.done.connect(lambda new, worker=t: self._on_annot_load_done(worker, path, new, default_track))
+        t.done.connect(
+            lambda new, worker=t: self._on_annot_load_done(worker, path, new, default_track)
+        )
         t.failed.connect(lambda msg, worker=t: self._on_annot_load_failed(worker, msg))
         self._annot_load_thread = t
         t.start()
 
     def _on_annot_load_done(self, worker, path, new, default_track):
         if self._annot_load_thread is not worker:
-            return   # une charge plus recente a pris le relais -- resultat perime
+            return  # une charge plus recente a pris le relais -- resultat perime
         self._annot_load_thread = None
         self._apply_loaded_annotations(path, new, True, default_track)
 
@@ -3108,13 +3558,17 @@ labels/frame_05000.txt
         if self._annot_load_thread is not worker:
             return
         self._annot_load_thread = None
-        QtWidgets.QMessageBox.warning(
-            self, "Annotations", f"Erreur chargement : {msg}")
+        QtWidgets.QMessageBox.warning(self, "Annotations", f"Erreur chargement : {msg}")
 
     def _stop_annot_load(self):
         if self._annot_load_thread is not None:
             self._annot_load_thread.stop()
             self._annot_load_thread = None
+
+    def _source_image_stems(self):
+        """Noms (sans extension) des images de la source courante, [] sinon."""
+        paths = getattr(self.source, "paths", None) or []
+        return [os.path.splitext(os.path.basename(p))[0] for p in paths]
 
     def _pair_yolo_by_name(self, by_stem):
         """Associe des annotations YOLO clees par le STEM du fichier label aux
@@ -3123,36 +3577,21 @@ labels/frame_05000.txt
           2. si AUCUN label ne matche une image par nom : appariement par ORDRE
              naturel (1er label <-> 1re image, 2e <-> 2e, ...).
         Renvoie un dict position(int) -> [dets]."""
-        from frameviewer.core.io_utils import natural_sort
-        paths = getattr(self.source, "paths", None)
-        stems = [os.path.splitext(os.path.basename(p))[0] for p in paths] if paths else []
-        by_lower = {}
-        for i, s in enumerate(stems):
-            by_lower.setdefault(s.lower(), i)   # 1re occurrence gagne
-        matched = {}
-        n_named = 0
-        for stem, dets in by_stem.items():
-            pos = by_lower.get(str(stem).lower())
-            if pos is not None:
-                matched.setdefault(pos, []).extend(dets)
-                n_named += 1
+        from frameviewer.core.annotation_loader import pair_stems_to_positions
+
+        out, n_named = pair_stems_to_positions(by_stem, self._source_image_stems())
         if n_named > 0:
             missing = len(by_stem) - n_named
             self.statusBar().showMessage(
                 f"Labels associés par nom : {n_named}/{len(by_stem)} fichier(s)"
-                + (f" ; {missing} sans image correspondante." if missing else "."), 7000)
-            return matched
-        # aucun match par nom -> appariement positionnel dans l'ordre naturel
-        order = natural_sort(list(by_stem.keys()))
-        limit = len(paths) if paths else len(order)
-        out = {}
-        for i, stem in enumerate(order):
-            if paths and i >= limit:
-                break
-            out.setdefault(i, []).extend(by_stem[stem])
+                + (f" ; {missing} sans image correspondante." if missing else "."),
+                7000,
+            )
+            return out
         self.statusBar().showMessage(
-            f"Aucun label associé par nom -- appariement par ordre naturel "
-            f"({len(out)} frame(s)).", 6000)
+            f"Aucun label associé par nom -- appariement par ordre naturel ({len(out)} frame(s)).",
+            6000,
+        )
         return out
 
     def _remap_yolo_to_positions(self, new):
@@ -3169,6 +3608,7 @@ labels/frame_05000.txt
         if not paths:
             return new
         from frameviewer.core.annotation_loader import _frame_num_from_name
+
         num_to_pos = {}
         for pos, p in enumerate(paths):
             n = _frame_num_from_name(p)
@@ -3208,20 +3648,34 @@ labels/frame_05000.txt
                 self._annot_track_next += 1
             n_added = 0
             for fr, dets in new.items():
-                remapped = [(d[0], d[1], d[2], d[3], d[4], remap[d[0]],
-                             d[6] if len(d) > 6 else ())
-                            for d in dets]
+                remapped = [
+                    (d[0], d[1], d[2], d[3], d[4], remap[d[0]], d[6] if len(d) > 6 else ())
+                    for d in dets
+                ]
                 self._annotations.setdefault(fr, []).extend(remapped)
                 n_added += len(remapped)
             for cls, key in remap.items():
                 class_label = next(
-                    (d[6][0] for dets in new.values() for d in dets
-                     if d[0] == cls and len(d) > 6 and d[6]),
-                    f"classe {cls}")
-                self._layers.append({
-                    "kind": "ver", "fmt": "yolo", "name": class_label,
-                    "key": key, "cls": cls, "visible": True, "file": base,
-                    "path": path})
+                    (
+                        d[6][0]
+                        for dets in new.values()
+                        for d in dets
+                        if d[0] == cls and len(d) > 6 and d[6]
+                    ),
+                    f"classe {cls}",
+                )
+                self._layers.append(
+                    {
+                        "kind": "ver",
+                        "fmt": "yolo",
+                        "name": class_label,
+                        "key": key,
+                        "cls": cls,
+                        "visible": True,
+                        "file": base,
+                        "path": path,
+                    }
+                )
             self._annot_path = path
             self._rebuild_layer_list()
             if not remap:
@@ -3231,13 +3685,17 @@ labels/frame_05000.txt
                 # attendu (espaces, coordonnees normalisees 0..1).
                 self.statusBar().showMessage(
                     f"Aucune boîte reconnue dans {os.path.basename(path)} -- "
-                    "format YOLO attendu : \"classe cx cy w h\" séparé par "
+                    'format YOLO attendu : "classe cx cy w h" séparé par '
                     "des espaces, coordonnées normalisées 0..1, un .txt par "
-                    "frame.", 8000)
+                    "frame.",
+                    8000,
+                )
             else:
                 self.statusBar().showMessage(
                     f"{len(remap)} calque(s) YOLO (par classe) : {n_added} boîtes "
-                    f"sur {len(new)} frames  ({os.path.basename(path)})", 6000)
+                    f"sur {len(new)} frames  ({os.path.basename(path)})",
+                    6000,
+                )
             self._display()
             return
 
@@ -3250,23 +3708,32 @@ labels/frame_05000.txt
         # correspond à rien pour un fichier long fournissant ses propres
         # track_id (ex. .ver multi-objets) -> c'était la cause du bug
         # « décocher le calque n'a aucun effet ».
-        tracks_found = sorted({
-            (d[5] if len(d) > 5 else default_track)
-            for dets in new.values() for d in dets
-        }) or [default_track]
+        tracks_found = sorted(
+            {(d[5] if len(d) > 5 else default_track) for dets in new.values() for d in dets}
+        ) or [default_track]
         existing_keys = {L["key"] for L in self._layers if L["kind"] == "ver"}
         for tid in tracks_found:
             if tid in existing_keys:
                 continue
-            self._layers.append({"kind": "ver", "fmt": "ver", "name": f"track {tid}",
-                                 "key": tid, "visible": True, "file": base,
-                                 "path": path})
+            self._layers.append(
+                {
+                    "kind": "ver",
+                    "fmt": "ver",
+                    "name": f"track {tid}",
+                    "key": tid,
+                    "visible": True,
+                    "file": base,
+                    "path": path,
+                }
+            )
         self._annot_track_next = max(default_track + 1, max(tracks_found) + 1)
         self._annot_path = path
         self._rebuild_layer_list()
         self.statusBar().showMessage(
             f"{len(tracks_found)} calque(s) .ver : {n_added} boîtes sur "
-            f"{len(new)} frames  ({os.path.basename(path)})", 6000)
+            f"{len(new)} frames  ({os.path.basename(path)})",
+            6000,
+        )
         self._display()
 
     # ----- gestionnaire de calques (par vue) -----
@@ -3289,8 +3756,7 @@ labels/frame_05000.txt
         dets = self._annotations.get(frame, [])
         if not dets:
             return []
-        return [d for d in dets
-                if self._layer_visible("ver", d[5] if len(d) > 5 else 0)]
+        return [d for d in dets if self._layer_visible("ver", d[5] if len(d) > 5 else 0)]
 
     # ----- suivi ROI <-> boîte .ver -----
     def _annot_track_at(self, x, y):
@@ -3351,7 +3817,8 @@ labels/frame_05000.txt
         if hasattr(self, "view"):
             self.view.set_roi_rect(*box)
         if self.tools_dock.isHidden():
-            self.tools_dock.show(); self.tools_dock.raise_()
+            self.tools_dock.show()
+            self.tools_dock.raise_()
         if not self.tools_panel.is_roi_active():
             self.tools_panel._set_tool("roi")
             self.view.set_tool_mode("roi")
@@ -3366,7 +3833,7 @@ labels/frame_05000.txt
             return
         self.layer_list.blockSignals(True)
         self.layer_list.clear()
-        groups = {}          # fichier .ver -> [(index dans self._layers, L), ...]
+        groups = {}  # fichier .ver -> [(index dans self._layers, L), ...]
         for i, L in enumerate(self._layers):
             if L["kind"] == "sidecar":
                 it = QtWidgets.QTreeWidgetItem([f"[SIDECAR]  {L['name']}"])
@@ -3384,15 +3851,16 @@ labels/frame_05000.txt
             # format) -> le libellé peut se baser sur la 1ère entrée.
             is_yolo_grp = entries[0][1].get("fmt") == "yolo"
             unit = "classe" if is_yolo_grp else "track"
-            parent = QtWidgets.QTreeWidgetItem(
-                [f"📄 {file}  ({n} {unit}{'s' if n > 1 else ''})"])
+            parent = QtWidgets.QTreeWidgetItem([f"{file}  ({n} {unit}{'s' if n > 1 else ''})"])
+            parent.setIcon(0, icons.icon("doc"))
             parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable)
-            parent.setData(0, Qt.UserRole, None)          # None = entrée de groupe
+            parent.setData(0, Qt.UserRole, None)  # None = entrée de groupe
             parent.setData(0, Qt.UserRole + 1, file)
             all_vis = all(L["visible"] for _, L in entries)
             any_vis = any(L["visible"] for _, L in entries)
             parent.setCheckState(
-                0, Qt.Checked if all_vis else (Qt.PartiallyChecked if any_vis else Qt.Unchecked))
+                0, Qt.Checked if all_vis else (Qt.PartiallyChecked if any_vis else Qt.Unchecked)
+            )
             self.layer_list.addTopLevelItem(parent)
             for i, L in entries:
                 disp = L.get("cls", L["key"]) if is_yolo_grp else L["key"]
@@ -3410,13 +3878,13 @@ labels/frame_05000.txt
         if i is not None:
             if i >= len(self._layers):
                 return
-            self._layers[i]["visible"] = (item.checkState(0) == Qt.Checked)
+            self._layers[i]["visible"] = item.checkState(0) == Qt.Checked
         else:
             # entrée de groupe (.ver) : sa case coche/décoche TOUS ses tracks.
             state = item.checkState(0)
             if state == Qt.PartiallyChecked:
                 return
-            want = (state == Qt.Checked)
+            want = state == Qt.Checked
             self.layer_list.blockSignals(True)
             for c in range(item.childCount()):
                 ch = item.child(c)
@@ -3464,8 +3932,8 @@ labels/frame_05000.txt
                     tid = L["key"]
                     for fr in list(self._annotations):
                         self._annotations[fr] = [
-                            d for d in self._annotations[fr]
-                            if (d[5] if len(d) > 5 else 0) != tid]
+                            d for d in self._annotations[fr] if (d[5] if len(d) > 5 else 0) != tid
+                        ]
                         if not self._annotations[fr]:
                             del self._annotations[fr]
                     if self._roi_track_id == tid:
@@ -3496,14 +3964,15 @@ labels/frame_05000.txt
         if self.source is None:
             self.statusBar().showMessage("Aucune source chargée.", 3000)
             return
-        if not any(L["kind"] == "ver" and L.get("fmt", "ver") == "ver"
-                   for L in self._layers):
+        if not any(L["kind"] == "ver" and L.get("fmt", "ver") == "ver" for L in self._layers):
             QtWidgets.QMessageBox.information(
-                self, "Export custom des calques",
+                self,
+                "Export custom des calques",
                 "Aucun calque .ver chargé sur la vue active.\n\n"
                 "(Cet export réorganise des tracks .ver — il ne s'applique "
                 "pas aux calques issus d'un dossier YOLO, qui n'ont pas de "
-                "concept de suivi entre frames.)")
+                "concept de suivi entre frames.)",
+            )
             return
         dlg = LayerExportDialog(self)
         dlg.exec()
@@ -3524,6 +3993,7 @@ labels/frame_05000.txt
         AppData\\FrameViewer (au lieu du registre Windows), cree a la premiere
         utilisation. Migre une seule fois l'ancien etat du registre si present."""
         from frameviewer.plugins.loader import user_config_dir
+
         path = os.path.join(user_config_dir(), "settings.ini")
         st = QtCore.QSettings(path, QtCore.QSettings.IniFormat)
         if not st.contains("enabled_plugins") and not st.contains("plugin_state"):
@@ -3546,13 +4016,17 @@ labels/frame_05000.txt
 
     def _save_enabled_plugin_ids(self):
         self._plugin_settings().setValue(
-            "enabled_plugins", [
-                pid for pid in self._plugin_loader.enabled_ids()
+            "enabled_plugins",
+            [
+                pid
+                for pid in self._plugin_loader.enabled_ids()
                 if pid not in _EPHEMERAL_DEMO_PLUGIN_IDS
-            ])
+            ],
+        )
 
     def _load_plugin_state(self):
         import json
+
         raw = self._plugin_settings().value("plugin_state", "")
         try:
             state = json.loads(raw) if raw else {}
@@ -3564,17 +4038,120 @@ labels/frame_05000.txt
 
     def _save_plugin_state(self):
         import json
+
         persistent = {
-            pid: value for pid, value in self._plugin_state.items()
+            pid: value
+            for pid, value in self._plugin_state.items()
             if pid not in _EPHEMERAL_DEMO_PLUGIN_IDS
         }
         self._plugin_settings().setValue("plugin_state", json.dumps(persistent))
 
     # ----- persistance de la disposition des panneaux (docks) -----
     def _dock_layout_targets(self):
-        return (("right_dock", getattr(self, "right_dock", None)),
-                ("tools_dock", getattr(self, "tools_dock", None)),
-                ("hist_dock", getattr(self, "hist_dock", None)))
+        return (
+            ("right_dock", getattr(self, "right_dock", None)),
+            ("tools_dock", getattr(self, "tools_dock", None)),
+            ("hist_dock", getattr(self, "hist_dock", None)),
+        )
+
+    # ----- parametres memorises par utilisateur (settings.ini, [params]) -----
+    def _persisted_controls(self):
+        """(cle, widget) des reglages globaux restaures au demarrage. Les
+        reglages propres a une vue (reticule, IN/OUT...) n'en font pas partie."""
+        return (
+            ("info_bar", self.info_bar_chk),
+            ("theme", self.theme_combo),
+            ("prefetch", self.prefetch_spin),
+            ("fetch_resolution", self.fetch_res_combo),
+            ("lut", self.lut_hist_combo),
+            ("filter_edges", self.flt_edges_chk),
+            ("filter_sharpen", self.flt_sharp_chk),
+            ("filter_invert", self.flt_invert_chk),
+            ("filter_clahe", self.flt_clahe_chk),
+            ("show_overlays", self.overlay_chk),
+        )
+
+    @staticmethod
+    def _control_value(w):
+        if isinstance(w, QtWidgets.QAbstractButton):
+            return w.isChecked()
+        if isinstance(w, QtWidgets.QComboBox):
+            return w.currentIndex()
+        return w.value()
+
+    @staticmethod
+    def _set_control_value(w, raw):
+        try:
+            if isinstance(w, QtWidgets.QAbstractButton):
+                on = (
+                    raw
+                    if isinstance(raw, bool)
+                    else str(raw).strip().lower() in ("1", "true", "yes", "on")
+                )
+                w.setChecked(on)
+            elif isinstance(w, QtWidgets.QComboBox):
+                i = int(raw)
+                if 0 <= i < w.count():
+                    w.setCurrentIndex(i)
+            elif isinstance(w, QtWidgets.QDoubleSpinBox):
+                w.setValue(float(raw))
+            else:
+                w.setValue(int(raw))
+        except (TypeError, ValueError):
+            pass  # valeur illisible dans le .ini : on garde le defaut
+
+    @staticmethod
+    def _control_signal(w):
+        if isinstance(w, QtWidgets.QAbstractButton):
+            return w.toggled
+        if isinstance(w, QtWidgets.QComboBox):
+            return w.currentIndexChanged
+        return w.valueChanged
+
+    def _init_persisted_params(self):
+        """Memorise les valeurs d'usine, applique celles du user, puis
+        enregistre chaque changement immediatement (rien perdu en cas de crash)."""
+        self._param_defaults = {k: self._control_value(w) for k, w in self._persisted_controls()}
+        st = self._plugin_settings()
+        st.beginGroup("params")
+        for key, w in self._persisted_controls():
+            raw = st.value(key, None)
+            if raw is not None:
+                self._set_control_value(w, raw)
+        st.endGroup()
+        for key, w in self._persisted_controls():
+            self._control_signal(w).connect(lambda *_a, k=key, ww=w: self._save_param(k, ww))
+
+    def _save_param(self, key, w):
+        if key == "lut" and self._temp_sub_on:
+            return  # LUT de difference imposee par la soustraction, pas un choix
+        st = self._plugin_settings()
+        st.setValue(f"params/{key}", self._control_value(w))
+
+    def _apply_theme(self, _=None):
+        apply_theme(self.theme_combo.currentData() or "dark")
+
+    def _reset_settings(self):
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            self._tr("Réinitialiser les réglages"),
+            self._tr(
+                "Remettre l'interface par défaut (paramètres, thème, raccourcis, "
+                "panneaux) ? Les plugins et leurs données sont conservés."
+            ),
+        )
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+        st = self._plugin_settings()
+        for group in ("params", "ui", "shortcuts"):
+            st.remove(group)
+        st.sync()
+        for key, w in self._persisted_controls():
+            self._set_control_value(w, self._param_defaults.get(key))
+        self._shortcut_map = load_shortcuts(st)
+        self._shortcuts()
+        self.restoreState(self._default_window_state)
+        self.status.showMessage("Réglages réinitialisés.", 4000)
 
     def _save_dock_layout(self):
         """Memorise, par utilisateur (settings.ini), l'etat ouvert/ferme des
@@ -3587,6 +4164,8 @@ labels/frame_05000.txt
                 st.setValue(name + "_visible", bool(dock.isVisible()))
         if hasattr(self, "right_tab"):
             st.setValue("right_tab_index", int(self.right_tab.currentIndex()))
+        st.setValue("geometry", self.saveGeometry())
+        st.setValue("window_state", self.saveState())
         st.endGroup()
         st.sync()
 
@@ -3594,6 +4173,12 @@ labels/frame_05000.txt
         """Applique la visibilite des panneaux memorisee (si presente)."""
         st = self._plugin_settings()
         st.beginGroup("ui")
+        geometry = st.value("geometry", None)
+        if isinstance(geometry, QtCore.QByteArray) and not geometry.isEmpty():
+            self.restoreGeometry(geometry)
+        state = st.value("window_state", None)
+        if isinstance(state, QtCore.QByteArray) and not state.isEmpty():
+            self.restoreState(state)
 
         def _as_bool(v, default):
             if v is None:
@@ -3638,9 +4223,14 @@ labels/frame_05000.txt
         # bucket par vue "__default__" (retro-compat des etats QSettings existants).
         if "contracts" in st or "elements" in st:
             st.setdefault("by_view", {})
-            st["by_view"].setdefault("__default__", {
-                "contracts": st.pop("contracts", None) or [{"name": "", "visible": True, "files": {}}],
-                "elements": st.pop("elements", None) or {}})
+            st["by_view"].setdefault(
+                "__default__",
+                {
+                    "contracts": st.pop("contracts", None)
+                    or [{"name": "", "visible": True, "files": {}}],
+                    "elements": st.pop("elements", None) or {},
+                },
+            )
             st.pop("sel_contract", None)
         st.setdefault("inputs", [])
         st.setdefault("by_view", {})
@@ -3689,7 +4279,7 @@ labels/frame_05000.txt
         key = self._current_view_key() if current else view_key
         bv = st["by_view"]
         if current and key not in bv and "__default__" in bv and len(bv) == 1:
-            bv[key] = bv.pop("__default__")   # l'etat pre-multivue devient celui de la vue courante
+            bv[key] = bv.pop("__default__")  # l'etat pre-multivue devient celui de la vue courante
         vs = bv.get(key)
         if vs is None:
             vs = {"contracts": [{"name": "", "visible": True, "files": {}}], "elements": {}}
@@ -3736,8 +4326,7 @@ labels/frame_05000.txt
         st = self._plugin_state_for(pid)
         vs = self._plugin_view_state(pid)
         req = [i["name"] for i in st["inputs"] if not i.get("hidden")]
-        groups = [c for c in vs["contracts"]
-                  if any(c["files"].get(n) for n in req)] if req else []
+        groups = [c for c in vs["contracts"] if any(c["files"].get(n) for n in req)] if req else []
         if req:
             last_complete = groups and all(groups[-1]["files"].get(n) for n in req)
             if not groups or last_complete:
@@ -3770,7 +4359,7 @@ labels/frame_05000.txt
         """Fichier de donnees depose sur une vue : propose (popup) de l'associer
         a une entree d'un plugin CODE actif, pour la VUE courante. Renvoie True
         si pris en charge (associe ou explicitement annule)."""
-        options = []   # [(lp, nom_entree)]
+        options = []  # [(lp, nom_entree)]
         for lp in self._plugin_loader.enabled_plugins():
             if lp.kind != "code":
                 continue
@@ -3782,18 +4371,21 @@ labels/frame_05000.txt
             return False
         labels = [f"{lp.name}  ->  {name}" for lp, name in options]
         item, ok = QtWidgets.QInputDialog.getItem(
-            self, "Associer le fichier au plugin",
+            self,
+            "Associer le fichier au plugin",
             f"Déposer « {os.path.basename(path)} » sur quelle entrée ?",
-            labels, 0, False)
+            labels,
+            0,
+            False,
+        )
         if not ok:
-            return True   # annulé : ne pas retomber sur une ouverture média (vouée à l'échec)
+            return True  # annulé : ne pas retomber sur une ouverture média (vouée à l'échec)
         lp, name = options[labels.index(item)]
         self._assign_file_to_view(lp.plugin_id, name, path)
         self._save_plugin_state()
         self._refresh_plugins_settings()
         self._repaint_views()
-        self.statusBar().showMessage(
-            f"{os.path.basename(path)} → {lp.name} / {name}", 4000)
+        self.statusBar().showMessage(f"{os.path.basename(path)} → {lp.name} / {name}", 4000)
         return True
 
     def _add_plugin_input(self, pid, varname):
@@ -3801,6 +4393,7 @@ labels/frame_05000.txt
         l'etat, le manifest.json (persistance), et injecte au mieux la ligne
         self.<varname> = None dans on_load du plugin.py. Renvoie True si ajout."""
         from frameviewer.plugins import manifest as _manifest
+
         st = self._plugin_state_for(pid)
         if any(i["name"] == varname for i in st["inputs"]):
             return False
@@ -3808,11 +4401,15 @@ labels/frame_05000.txt
         lp = self._plugin_by_id(pid)
         if lp is not None:
             names = [i["name"] for i in st["inputs"]]
-            _manifest.save(lp.folder, {
-                "name": lp.manifest.get("name", pid),
-                "kind": lp.manifest.get("kind", "code"),
-                "frame_input": lp.manifest.get("frame_input", "Current Frame"),
-                "inputs": [{"name": n} for n in names]})
+            _manifest.save(
+                lp.folder,
+                {
+                    "name": lp.manifest.get("name", pid),
+                    "kind": lp.manifest.get("kind", "code"),
+                    "frame_input": lp.manifest.get("frame_input", "Current Frame"),
+                    "inputs": [{"name": n} for n in names],
+                },
+            )
             lp.manifest = _manifest.load(lp.folder)
             self._inject_input_attr(lp.folder, varname)
         self._save_plugin_state()
@@ -3822,6 +4419,7 @@ labels/frame_05000.txt
         """Supprime une entree declaree : etat + fichiers deposes + manifest.json
         + la ligne self.<varname> = ... dans plugin.py. Renvoie True si retire."""
         from frameviewer.plugins import manifest as _manifest
+
         st = self._plugin_state_for(pid)
         if not any(i["name"] == varname for i in st["inputs"]):
             return False
@@ -3832,11 +4430,15 @@ labels/frame_05000.txt
         lp = self._plugin_by_id(pid)
         if lp is not None:
             names = [i["name"] for i in st["inputs"]]
-            _manifest.save(lp.folder, {
-                "name": lp.manifest.get("name", pid),
-                "kind": lp.manifest.get("kind", "code"),
-                "frame_input": lp.manifest.get("frame_input", "Current Frame"),
-                "inputs": [{"name": n} for n in names]})
+            _manifest.save(
+                lp.folder,
+                {
+                    "name": lp.manifest.get("name", pid),
+                    "kind": lp.manifest.get("kind", "code"),
+                    "frame_input": lp.manifest.get("frame_input", "Current Frame"),
+                    "inputs": [{"name": n} for n in names],
+                },
+            )
             lp.manifest = _manifest.load(lp.folder)
             self._remove_input_attr(lp.folder, varname)
         self._save_plugin_state()
@@ -3847,6 +4449,7 @@ labels/frame_05000.txt
         """Retire la ligne d'assignation self.<varname> = ... de plugin.py
         (best-effort ; les usages ailleurs dans le code ne sont pas touches)."""
         import re
+
         path = os.path.join(folder, "plugin.py")
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -3886,6 +4489,7 @@ labels/frame_05000.txt
     def _build_plugins_tab(self):
         """Contenu de l'onglet Plugins (modele v2) : delegue a PluginsPanel."""
         from frameviewer.ui.plugins_panel import PluginsPanel
+
         self._plugins_panel = PluginsPanel(self)
         return self._plugins_panel
 
@@ -3920,16 +4524,25 @@ labels/frame_05000.txt
         if not txt or len(txt) != 1 or not txt.isprintable() or txt.isdigit():
             return False
         fw = QtWidgets.QApplication.focusWidget()
-        if isinstance(fw, (QtWidgets.QLineEdit, QtWidgets.QAbstractSpinBox,
-                           QtWidgets.QPlainTextEdit, QtWidgets.QTextEdit)):
+        if isinstance(
+            fw,
+            (
+                QtWidgets.QLineEdit,
+                QtWidgets.QAbstractSpinBox,
+                QtWidgets.QPlainTextEdit,
+                QtWidgets.QTextEdit,
+            ),
+        ):
             return False
         if isinstance(fw, QtWidgets.QComboBox) and fw.isEditable():
             return False
         ch = txt.strip().lower()
         # ne consomme que si un plugin actif a REELLEMENT cette touche mappee
-        mapped = any(str(v).strip().lower() == ch
-                     for lp in self._plugin_loader.enabled_plugins()
-                     for v in (getattr(lp, "element_keys", None) or {}).values())
+        mapped = any(
+            str(v).strip().lower() == ch
+            for lp in self._plugin_loader.enabled_plugins()
+            for v in (getattr(lp, "element_keys", None) or {}).values()
+        )
         if not mapped:
             return False
         return self._toggle_plugin_elements_by_key(txt)
@@ -3953,16 +4566,18 @@ labels/frame_05000.txt
             self._repaint_views()
             panel = getattr(self, "_plugins_panel", None)
             if panel is not None:
-                panel.update_summary()   # rafraichit les cases cochees
+                panel.update_summary()  # rafraichit les cases cochees
         return hit
 
     # --- editeurs / creation / gestion ---
     def _open_graph_editor_for(self, folder):
         from frameviewer.ui.node_graph_editor import open_node_graph_editor
+
         open_node_graph_editor(self, folder, on_saved=self._after_plugins_changed)
 
     def _open_code_editor_for(self, entry_name):
         from frameviewer.ui.plugin_editor_dialog import PluginEditorDialog
+
         dlg = PluginEditorDialog(self)
         dlg.select_entry(entry_name)
         dlg.exec()
@@ -3973,13 +4588,15 @@ labels/frame_05000.txt
         dans le dossier PERSO de l'utilisateur (AppData\\FrameViewer\\plugins).
         Renvoie le dossier racine choisi, ou None si annule."""
         from frameviewer.plugins.loader import plugins_root, user_plugins_dir
+
         box = QtWidgets.QMessageBox(self)
         box.setWindowTitle("Emplacement du plugin")
         box.setText("Où créer ce plugin ?")
         box.setInformativeText(
             "À côté de l'app : livré avec l'exe (dossier plugins/).\n"
             "Dossier utilisateur : perso, dans AppData\\FrameViewer\\plugins "
-            "(propre à ce PC, conservé même si tu remplaces l'exe).")
+            "(propre à ce PC, conservé même si tu remplaces l'exe)."
+        )
         b_app = box.addButton("À côté de l'app", QtWidgets.QMessageBox.AcceptRole)
         b_user = box.addButton("Dossier utilisateur", QtWidgets.QMessageBox.AcceptRole)
         box.addButton("Annuler", QtWidgets.QMessageBox.RejectRole)
@@ -3996,9 +4613,12 @@ labels/frame_05000.txt
         from frameviewer.plugins import manifest as _manifest
         from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX
         from frameviewer.ui.node_graph_editor import open_node_graph_editor
+
         name, ok = QtWidgets.QInputDialog.getText(
-            self, "Nouveau plugin graphe",
-            "Nom du plugin (lettres/chiffres/underscore, commence par une lettre) :")
+            self,
+            "Nouveau plugin graphe",
+            "Nom du plugin (lettres/chiffres/underscore, commence par une lettre) :",
+        )
         if not ok or not name.strip():
             return
         slug = re.sub(r"[^a-zA-Z0-9_]", "_", name.strip().lower())
@@ -4022,6 +4642,7 @@ labels/frame_05000.txt
         from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX
         from frameviewer.ui.plugin_editor_dialog import PluginEditorDialog
         from frameviewer.ui.plugins_panel import CodePluginWizard, write_code_plugin_template
+
         dlg = CodePluginWizard(self)
         if not dlg.exec():
             return
@@ -4038,12 +4659,19 @@ labels/frame_05000.txt
         folder = os.path.join(root, f"{PLUGIN_FOLDER_PREFIX}{slug}")
         if os.path.isdir(folder):
             QtWidgets.QMessageBox.warning(
-                self, "Nouveau plugin code", f"Le plugin '{slug}' existe déjà.")
+                self, "Nouveau plugin code", f"Le plugin '{slug}' existe déjà."
+            )
             return
         os.makedirs(folder, exist_ok=True)
-        _manifest.save(folder, {"name": name.strip(), "kind": "code",
-                                "frame_input": frame_input.strip() or "Current Frame",
-                                "inputs": inputs})
+        _manifest.save(
+            folder,
+            {
+                "name": name.strip(),
+                "kind": "code",
+                "frame_input": frame_input.strip() or "Current Frame",
+                "inputs": inputs,
+            },
+        )
         write_code_plugin_template(folder, slug, name.strip(), inputs)
         self._plugin_loader.reload_all()
         self._refresh_plugins_settings()
@@ -4054,12 +4682,15 @@ labels/frame_05000.txt
 
     def _delete_plugin(self, pid, folder):
         import shutil
+
         lp = self._plugin_by_id(pid)
         name = lp.name if lp is not None else pid
         r = QtWidgets.QMessageBox.question(
-            self, "Supprimer le plugin",
+            self,
+            "Supprimer le plugin",
             f"Supprimer définitivement le plugin « {name} » et son dossier ?\n{folder}",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        )
         if r != QtWidgets.QMessageBox.Yes:
             return
         try:
@@ -4077,13 +4708,16 @@ labels/frame_05000.txt
         plugin.py, il est copie dans le dossier plugins/."""
         import shutil
         from frameviewer.plugins.loader import PLUGIN_FOLDER_PREFIX, plugins_root
+
         src = QtWidgets.QFileDialog.getExistingDirectory(
-            self, self._tr("Choisir le dossier du plugin à importer"))
+            self, self._tr("Choisir le dossier du plugin à importer")
+        )
         if not src:
             return
         if not os.path.isfile(os.path.join(src, "plugin.py")):
             QtWidgets.QMessageBox.warning(
-                self, "Importer un plugin", "Le dossier ne contient pas de plugin.py.")
+                self, "Importer un plugin", "Le dossier ne contient pas de plugin.py."
+            )
             return
         base = os.path.basename(os.path.normpath(src))
         if not base.startswith(PLUGIN_FOLDER_PREFIX):
@@ -4102,7 +4736,7 @@ labels/frame_05000.txt
 
     def _open_folder(self, folder):
         try:
-            os.startfile(folder)   # Windows
+            os.startfile(folder)  # Windows
         except Exception:
             QtWidgets.QMessageBox.information(self, "Dossier du plugin", folder)
 
@@ -4110,7 +4744,8 @@ labels/frame_05000.txt
         """Ouvre le dossier de config utilisateur (AppData\\FrameViewer) :
         settings.ini + dossier plugins/ perso (cree a la volee si besoin)."""
         from frameviewer.plugins.loader import user_config_dir, user_plugins_dir
-        user_plugins_dir()          # garantit l'existence du sous-dossier plugins/
+
+        user_plugins_dir()  # garantit l'existence du sous-dossier plugins/
         self._open_folder(user_config_dir())
 
     def _reload_plugins_from_settings(self):
@@ -4123,6 +4758,7 @@ labels/frame_05000.txt
         logs/prints/erreurs, test sur la frame courante, diagnostic env, export
         debug VS Code."""
         from frameviewer.ui.plugin_console_dialog import PluginConsoleDialog
+
         dlg = getattr(self, "_plugin_console", None)
         if dlg is None:
             dlg = PluginConsoleDialog(self)
@@ -4134,6 +4770,7 @@ labels/frame_05000.txt
     def _open_plugin_help(self):
         """Ouvre l'aide plugin (hooks + api par theme, requis en vert)."""
         from frameviewer.ui.plugin_help_dialog import PluginHelpDialog
+
         dlg = getattr(self, "_plugin_help", None)
         if dlg is None:
             dlg = PluginHelpDialog(self)
@@ -4148,23 +4785,31 @@ labels/frame_05000.txt
         prete pour le runner. Le mode debug (terminal ou VS Code F5) proposera
         ensuite les frames de CE plugin."""
         import numpy as np
+
         if self._raw is None:
-            QtWidgets.QMessageBox.information(
-                self, "Export debug", "Aucune séquence ouverte.")
+            QtWidgets.QMessageBox.information(self, "Export debug", "Aucune séquence ouverte.")
             return
         loader = getattr(self, "_plugin_loader", None)
         plugins = list(loader.enabled_plugins()) if loader is not None else []
         if not plugins:
             QtWidgets.QMessageBox.information(
-                self, "Export debug",
+                self,
+                "Export debug",
                 "Aucun plugin actif : coche « Actif » sur au moins un plugin dans "
-                "l'onglet Plugins avant d'exporter une frame de debug.")
+                "l'onglet Plugins avant d'exporter une frame de debug.",
+            )
             return
         # plugin par defaut = celui selectionne dans l'onglet, s'il est actif.
         panel = getattr(self, "_plugins_panel", None)
         sel = panel.selected_lp() if panel is not None else None
-        default_idx = next((i for i, lp in enumerate(plugins)
-                            if sel is not None and lp.plugin_id == sel.plugin_id), 0)
+        default_idx = next(
+            (
+                i
+                for i, lp in enumerate(plugins)
+                if sel is not None and lp.plugin_id == sel.plugin_id
+            ),
+            0,
+        )
 
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Debug plugin hors interface")
@@ -4186,9 +4831,12 @@ labels/frame_05000.txt
         edit.setStyleSheet("font-family:Consolas,monospace; font-size:12px;")
         edit.setMaximumHeight(80)
         v.addWidget(edit)
-        v.addWidget(QtWidgets.QLabel(
-            "Ou sans argument (le runner demande le plugin puis la frame), idem "
-            "que la config VS Code « Debug plugin (frame courante) » (F5) :"))
+        v.addWidget(
+            QtWidgets.QLabel(
+                "Ou sans argument (le runner demande le plugin puis la frame), idem "
+                "que la config VS Code « Debug plugin (frame courante) » (F5) :"
+            )
+        )
         edit2 = QtWidgets.QPlainTextEdit("python -m frameviewer.plugins.debug_runner")
         edit2.setReadOnly(True)
         edit2.setStyleSheet("font-family:Consolas,monospace; font-size:12px;")
@@ -4203,7 +4851,7 @@ labels/frame_05000.txt
                 return
             debug_dir = os.path.join(lp.folder, "debug")
             os.makedirs(debug_dir, exist_ok=True)
-            disp = self.process(self._apply_rotation(self._raw))   # 8-bit BGR affiche
+            disp = self.process(self._apply_rotation(self._raw))  # 8-bit BGR affiche
             npy = os.path.join(debug_dir, f"frame{self.cur:04d}.npy")
             np.save(npy, disp)
             input_args = ""
@@ -4214,14 +4862,17 @@ labels/frame_05000.txt
             # chemin COMPLET du plugin (pas seulement le nom) : le runner debug
             # cible ainsi exactement le plugin utilise par l'app (a cote de l'exe
             # ou user space), jamais une autre copie re-resolue (ex. sources).
-            cmd = (f'python -m frameviewer.plugins.debug_runner '
-                   f'--plugin "{lp.folder}" --npy "{npy}" '
-                   f'--frame-index {self.cur}{input_args}')
+            cmd = (
+                f"python -m frameviewer.plugins.debug_runner "
+                f'--plugin "{lp.folder}" --npy "{npy}" '
+                f"--frame-index {self.cur}{input_args}"
+            )
             state["cmd"], state["debug_dir"] = cmd, debug_dir
             info.setText(
                 f"Frame enregistrée dans le dossier debug/ du plugin :\n{npy}\n\n"
                 "Depuis le dossier FrameViewer (qui contient le package "
-                "frameviewer/), commande directe :")
+                "frameviewer/), commande directe :"
+            )
             edit.setPlainText(cmd)
             if loader is not None:
                 loader.log(f"=== Export frame debug ({lp.name}) ===\nFrame -> {npy}")
@@ -4231,8 +4882,7 @@ labels/frame_05000.txt
 
         row = QtWidgets.QHBoxLayout()
         b_copy = QtWidgets.QPushButton("Copier la commande")
-        b_copy.clicked.connect(
-            lambda: QtWidgets.QApplication.clipboard().setText(state["cmd"]))
+        b_copy.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(state["cmd"]))
         row.addWidget(b_copy)
         b_open = QtWidgets.QPushButton("Ouvrir le dossier")
         b_open.clicked.connect(lambda: self._open_folder(state["debug_dir"]))
@@ -4272,14 +4922,20 @@ labels/frame_05000.txt
         # SAUF quand on tape dans un champ texte (line edit, spin, editeur...).
         if ev.type() == QtCore.QEvent.KeyPress and self._app_key_toggle(ev):
             return True
-        if (hasattr(self, "layer_list") and obj is self.layer_list
-                and ev.type() == QtCore.QEvent.KeyPress
-                and ev.key() in (Qt.Key_Delete, Qt.Key_Backspace)):
+        if (
+            hasattr(self, "layer_list")
+            and obj is self.layer_list
+            and ev.type() == QtCore.QEvent.KeyPress
+            and ev.key() in (Qt.Key_Delete, Qt.Key_Backspace)
+        ):
             self._delete_selected_layers()
             return True
-        if (hasattr(self, "hist_list") and obj is self.hist_list
-                and ev.type() == QtCore.QEvent.KeyPress
-                and ev.key() in (Qt.Key_Delete, Qt.Key_Backspace)):
+        if (
+            hasattr(self, "hist_list")
+            and obj is self.hist_list
+            and ev.type() == QtCore.QEvent.KeyPress
+            and ev.key() in (Qt.Key_Delete, Qt.Key_Backspace)
+        ):
             # Suppr / Retour arriere / Maj+Suppr (le modificateur Maj ne
             # change pas la touche rapportee) : retire de l'historique la ou
             # les entrees selectionnees (sans toucher a la source ouverte).
@@ -4309,8 +4965,7 @@ labels/frame_05000.txt
         else:
             orig_h, orig_w = img.shape[:2]
         s = getattr(self, "_fetch_scale", 1.0) or 1.0
-        return draw_annotation_boxes(img, annots, orig_w, orig_h,
-                                     rotation=self._rotation, scale=s)
+        return draw_annotation_boxes(img, annots, orig_w, orig_h, rotation=self._rotation, scale=s)
 
     # ----- ouverture / drag&drop -----
     def dragEnterEvent(self, e):
@@ -4324,8 +4979,11 @@ labels/frame_05000.txt
         if len(paths) == 1 and os.path.isdir(paths[0]):
             self._open_dropped_folder(paths[0])
             return
-        _is_annot = is_annotation_path if _HAS_ANNOT else (
-            lambda p: os.path.splitext(p)[1].lower() in (".ver", ".txt"))
+        _is_annot = (
+            is_annotation_path
+            if _HAS_ANNOT
+            else (lambda p: os.path.splitext(p)[1].lower() in (".ver", ".txt"))
+        )
         if paths and all(_is_annot(p) for p in paths):
             # plusieurs .ver = plusieurs tracks superposés sur la séquence
             for p in paths:
@@ -4378,16 +5036,18 @@ labels/frame_05000.txt
             return
         images, txts, vers = scan_dropped_folder(folder)
         if images:
-            self.open_folder(folder, files=images)   # reutilise l'enumeration du scan
+            self.open_folder(folder, files=images)  # reutilise l'enumeration du scan
         if txts:
             self._load_dropped_annotations(folder)
         for vp in vers:
             self._load_dropped_annotations(vp)
         if not images and not txts and not vers:
             QtWidgets.QMessageBox.information(
-                self, "Dossier déposé",
+                self,
+                "Dossier déposé",
                 "Aucune image ni annotation (.txt/.ver) trouvée directement "
-                f"dans ce dossier (les sous-dossiers ne sont pas explorés) :\n{folder}")
+                f"dans ce dossier (les sous-dossiers ne sont pas explorés) :\n{folder}",
+            )
 
     def open_paths(self, paths):
         paths = [p for p in paths if p]
@@ -4414,11 +5074,14 @@ labels/frame_05000.txt
             else:
                 self._pending = (overlays, info)
                 self.sidecar_label.setText(
-                    f"{len(overlays)} frames annotees (en attente de la sequence)")
+                    f"{len(overlays)} frames annotees (en attente de la sequence)"
+                )
                 QtWidgets.QMessageBox.information(
-                    self, "Sequence introuvable",
+                    self,
+                    "Sequence introuvable",
                     "SIDECAR charge. Depose aussi la sequence correspondante "
-                    "(SPECIALIZED / video / dossier d'images).")
+                    "(SPECIALIZED / video / dossier d'images).",
+                )
                 return
 
         # SIDECAR depose alors qu'un media est deja ouvert -> on l'applique directement
@@ -4435,9 +5098,9 @@ labels/frame_05000.txt
             if supports_path(p, "sequence_format"):
                 self.open_specialized(p)
             elif ext == ".yuv":
-                self.open_yuv(p)          # brut : dialogue geometrie/format
+                self.open_yuv(p)  # brut : dialogue geometrie/format
             elif ext == ".webp":
-                self._open_webp(p)        # webp anime -> video, sinon image
+                self._open_webp(p)  # webp anime -> video, sinon image
             elif ext in IMAGE_EXTS:
                 self.open_folder(os.path.dirname(os.path.abspath(p)), start_with=p)
             else:
@@ -4459,7 +5122,7 @@ labels/frame_05000.txt
         animated = False
         try:
             probe = VideoSource(p)
-            animated = (probe.get(0) is not None and probe.get(1) is not None)
+            animated = probe.get(0) is not None and probe.get(1) is not None
             probe.close()
         except Exception:
             animated = False
@@ -4495,7 +5158,8 @@ labels/frame_05000.txt
             if ch.isdigit():
                 cur += ch
             elif cur:
-                nums.append(int(cur)); cur = ""
+                nums.append(int(cur))
+                cur = ""
         if cur:
             nums.append(int(cur))
         if len(nums) >= 2:
@@ -4518,6 +5182,7 @@ labels/frame_05000.txt
             return
         w, h = self._parse_yuv_dims(os.path.basename(files[0]))
         from frameviewer.ui.yuv_import_dialog import YuvImportDialog
+
         dlg = YuvImportDialog(self, size, w, h)
         if not dlg.exec():
             return
@@ -4544,8 +5209,9 @@ labels/frame_05000.txt
         if files is None:
             files = list_images(folder)
         if not files:
-            QtWidgets.QMessageBox.warning(self, "Dossier vide",
-                                          f"Aucune image (png/jpg/...) dans:\n{folder}")
+            QtWidgets.QMessageBox.warning(
+                self, "Dossier vide", f"Aucune image (png/jpg/...) dans:\n{folder}"
+            )
             return
         label = os.path.basename(folder.rstrip("/\\")) or folder
         src = ImageSequenceSource(files, label=label, directory=folder)
@@ -4572,17 +5238,18 @@ labels/frame_05000.txt
         filters.insert(0, f"Medias ({' '.join(media_patterns)})")
         filters.extend(("YUV brut (*.yuv)", "Tous les fichiers (*)"))
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, self._tr("Ouvrir un media"), "",
-            ";;".join(filters))
+            self, self._tr("Ouvrir un media"), "", ";;".join(filters)
+        )
         if path:
             self.open_paths([path])
 
     def open_dir_dialog(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, self._tr("Ouvrir un dossier d'images"))
+            self, self._tr("Ouvrir un dossier d'images")
+        )
         if not folder:
             return
-        if list_files(folder, {".yuv"}):     # dossier de .yuv bruts -> sequence YUV
+        if list_files(folder, {".yuv"}):  # dossier de .yuv bruts -> sequence YUV
             self.open_yuv(folder)
         else:
             self.open_folder(folder)
@@ -4590,12 +5257,13 @@ labels/frame_05000.txt
     def set_source(self, src, start_index=0):
         self.stop()
         self._stop_annot_load()
+        # le prefetch lit l'ancienne source : l'arreter AVANT de la fermer
+        self._stop_prefetch()
+        self._prefetch_cache.clear()
         if self.source:
             self._add_to_history(self.source)
             self.source.close()
         self.source = src
-        self._stop_prefetch()
-        self._prefetch_cache.clear()
         self._extract_start = -1
         self._extract_end = -1
         if hasattr(self, "slider"):
@@ -4635,12 +5303,10 @@ labels/frame_05000.txt
         # configuration de l'histogramme selon le type de source
         self._configure_hist(src)
 
-        self._rebuild_convert_menu()
         # audio : charger la source si video
         if self._audio_player is not None:
             if isinstance(src, VideoSource):
-                self._audio_player.setSource(
-                    QUrl.fromLocalFile(os.path.abspath(src.path)))
+                self._audio_player.setSource(QUrl.fromLocalFile(os.path.abspath(src.path)))
             else:
                 self._audio_player.setSource(QUrl())
             self.son_btn.setEnabled(isinstance(src, VideoSource))
@@ -4648,16 +5314,17 @@ labels/frame_05000.txt
         self._setup_clicks_file()
         self._load_existing_clicks()
         self._enable_playback(True)
-        self.setWindowTitle(f"FrameViewer - {src.name}")
+        self.setWindowTitle(f"FrameViewer {__version__} - {src.name}")
         if hasattr(self, "_primary_frame"):
             self._primary_frame.set_name(src.name)
             self._primary_frame.mini.set_range(n)
         self.seek(start_index)
-        self._add_to_history(src)     # ajoute le nouveau source (1ere seq ou apres ouverture)
+        self._add_to_history(src)  # ajoute le nouveau source (1ere seq ou apres ouverture)
         self._highlight_history()
-        self.view.setFocus()          # les fleches gauche/droite agissent de suite
+        self.view.setFocus()  # les fleches gauche/droite agissent de suite
         self.status.showMessage(
-            f"{src.name}  |  {n if n else '?'} frames  |  {src.fps:.2f} fps  |  clics -> {self.clicks_path}")
+            f"{src.name}  |  {n if n else '?'} frames  |  {src.fps:.2f} fps  |  clics -> {self.clicks_path}"
+        )
 
         # overlays SIDECAR deposes avant la sequence
         if self._pending is not None:
@@ -4666,8 +5333,7 @@ labels/frame_05000.txt
             self.apply_overlays(ov, inf)
 
         # mode temporel actif : le moteur a changé de flux -> re-cloner le 2e lecteur
-        if (getattr(self, "_split_canvas", None) is not None
-                and self._split_canvas.is_temporal()):
+        if getattr(self, "_split_canvas", None) is not None and self._split_canvas.is_temporal():
             self._ensure_temporal_source()
             self._sync_temporal(self.cur)
 
@@ -4685,7 +5351,7 @@ labels/frame_05000.txt
                     info = np.iinfo(inten0.dtype)
                     dmin, dmax = float(info.min), float(info.max)
                 else:
-                    dmin, dmax = float(np.min(inten0)), float(np.max(inten0))
+                    dmin, dmax = finite_range(inten0)
             else:
                 dmin, dmax = 0.0, 255.0
             if dmax <= dmin:
@@ -4702,7 +5368,7 @@ labels/frame_05000.txt
                     info = np.iinfo(inten0.dtype)
                     dmin, dmax = float(info.min), float(info.max)
                 else:
-                    dmin, dmax = float(np.min(inten0)), float(np.max(inten0))
+                    dmin, dmax = finite_range(inten0)
                 if dmax <= dmin:
                     dmax = dmin + 1.0
                 self.hist.set_data_range(dmin, dmax)
@@ -4722,8 +5388,7 @@ labels/frame_05000.txt
         # calque SIDECAR (un seul, remplacé) dans le gestionnaire
         self._layers = [L for L in self._layers if L["kind"] != "sidecar"]
         if n:
-            self._layers.insert(0, {"kind": "sidecar", "name": name,
-                                    "key": "sidecar", "visible": True})
+            self._layers.insert(0, {"kind": "sidecar", "name": name, "key": "sidecar", "visible": True})
         self._rebuild_layer_list()
         # La dynamique <iddyn> du SIDECAR vise l'imagerie deja 8 bits du pipeline Java.
         # On ne l'applique que si elle recouvre vraiment la dynamique de la source
@@ -4760,8 +5425,7 @@ labels/frame_05000.txt
             # formes plugin (meme schema/moteur -- voir docs/plugins.md) : on
             # separe la vue active (moteur) des formes multivue (ciblant une
             # autre vue ou segments inter-vues) qui passent par MultiViewOverlay.
-            active, multiview = self._partition_plugin_overlays(
-                self._plugin_overlays_for(self.cur))
+            active, multiview = self._partition_plugin_overlays(self._plugin_overlays_for(self.cur))
             graphs = graphs + active
         self.view.set_overlays(graphs)
         self._update_sidecar_logs(graphs)
@@ -4779,8 +5443,7 @@ labels/frame_05000.txt
         else:
             multiview = []
             if self.source is not None and self.overlay_chk.isChecked():
-                _, multiview = self._partition_plugin_overlays(
-                    self._plugin_overlays_for(self.cur))
+                _, multiview = self._partition_plugin_overlays(self._plugin_overlays_for(self.cur))
         ctx = self._views_context()
         if ctx.get("count", 0) >= 2:
             multiview = multiview + self._plugin_loader.collect_multiview_overlays(ctx)
@@ -4823,20 +5486,52 @@ labels/frame_05000.txt
         else:
             idx = max(0, idx)
         frame = self._prefetch_cache.pop(idx, None)
-        if frame is None:
+        if frame is not None:
+            self._update_primary_info(idx, frame, self._fetch_scale)
+        else:
             frame = self.source.get(idx)
+            self._sync_count_widgets()
             if frame is None:
                 return
+            self._update_primary_info(idx, frame)
             frame = self._apply_fetch_scale(frame)
         self._raw = frame
         self._prefetch_schedule(idx)
         self.cur = idx
-        self._sync_temporal(idx)        # mode temporel : vue gauche à i-N (avant rendu)
+        self._sync_temporal(idx)  # mode temporel : vue gauche à i-N (avant rendu)
         self._display()
-        self._sync_view_frame(idx)      # vues liées : même frame partout
+        self._sync_view_frame(idx)  # vues liées : même frame partout
         if self._audio_player is not None:
             fps_src = getattr(self.source, "fps", self.fps_spin.value() or 25.0)
             self._audio_player.setPosition(int(idx * 1000.0 / max(fps_src, 0.001)))
+
+    def _update_primary_info(self, idx, frame, scale=1.0):
+        """Ligne d'infos sous la vue moteur (fichier, taille, type, fps...)."""
+        if BaseViewFrame.info_bar_enabled and hasattr(self, "_primary_frame"):
+            self._primary_frame.set_frame_info(frame_info(self.source, idx, frame, scale))
+
+    def _on_info_bar_toggled(self, on):
+        self._split_canvas.set_info_bar_enabled(on)
+        if on:
+            if self.source is not None and self._raw is not None:
+                self._update_primary_info(self.cur, self._raw, self._fetch_scale)
+            for sv in self._split_canvas.satellites():
+                if sv.has_source():
+                    sv._render()
+
+    def _sync_count_widgets(self):
+        """Une video peut corriger sa longueur en cours de lecture (compte
+        annonce faux) : on realigne slider et champ frame sur le vrai total."""
+        n = self.source.count if self.source is not None else 0
+        last = max(0, n - 1)
+        if n <= 0 or self.slider.maximum() == last:
+            return
+        for w in (self.slider, self.frame_spin):
+            w.blockSignals(True)
+            w.setMaximum(last)
+            w.blockSignals(False)
+        if hasattr(self, "_primary_frame"):
+            self._primary_frame.mini.set_range(n)
 
     def _full_amplitude(self):
         """Amplitude max selon le type des donnees brutes (pleine plage) :
@@ -4851,7 +5546,7 @@ labels/frame_05000.txt
             return (float(info.min), float(info.max))
         inten = to_intensity(raw)
         if inten.size:
-            return (float(np.min(inten)), float(np.max(inten)))
+            return finite_range(inten)
         return self.hist.full_range
 
     def _display(self):
@@ -4861,14 +5556,15 @@ labels/frame_05000.txt
         inten = to_intensity(analysis_raw)
         mode = self.hist.per_frame_mode()
         if self._temp_sub_on:
-            amplitude = max(abs(float(np.min(inten))), abs(float(np.max(inten))), 1.0)
+            dmin, dmax = finite_range(inten)
+            amplitude = max(abs(dmin), abs(dmax), 1.0)
             self.hist.set_data_range(-amplitude, amplitude)
             if self._temp_sub_needs_window:
                 self.hist.set_window(-amplitude, amplitude, emit=False)
                 self._temp_sub_needs_window = False
         # certains modes par frame redefinissent aussi le domaine de l'histogramme
         elif mode == "Min/Max":
-            self.hist.set_data_range(float(np.min(inten)), float(np.max(inten)))
+            self.hist.set_data_range(*finite_range(inten))
         elif mode == "Pleine plage":
             self.hist.set_data_range(*self._full_amplitude())
         self.hist.set_histogram(inten)
@@ -4877,7 +5573,7 @@ labels/frame_05000.txt
                 lo, hi = auto_window_sigma(inten)
                 self.hist.set_window(lo, hi, emit=False)
             elif mode == "Min/Max":
-                self.hist.set_window(float(np.min(inten)), float(np.max(inten)), emit=False)
+                self.hist.set_window(*finite_range(inten), emit=False)
             elif mode == "Pleine plage":
                 self.hist.set_window(*self._full_amplitude(), emit=False)
         raw_rot = self._apply_rotation(self._raw)
@@ -4913,8 +5609,7 @@ labels/frame_05000.txt
             cv2.line(out, (_cx - _sz, _cy), (_cx + _sz, _cy), _col, 1, cv2.LINE_AA)
             cv2.line(out, (_cx, _cy - _sz), (_cx, _cy + _sz), _col, 1, cv2.LINE_AA)
         # annotations .ver : gated par « Afficher les overlays » + visibilité calque
-        if (self._annotations and out is not None
-                and self.overlay_chk.isChecked()):
+        if self._annotations and out is not None and self.overlay_chk.isChecked():
             frame_annots = self._visible_annots(self.cur)
             if frame_annots:
                 out = self._draw_annotations(out, frame_annots)
@@ -4923,8 +5618,7 @@ labels/frame_05000.txt
         # ensuite (composition multivue de la vue primaire notamment).
         if out is not None:
             hp, wp = out.shape[:2]
-            patches = self._plugin_patches_for(
-                self.cur, (max(1, wp // 4), max(1, hp // 4)))
+            patches = self._plugin_patches_for(self.cur, (max(1, wp // 4), max(1, hp // 4)))
             if patches:
                 out = composite_patches(out, patches)
             # overlay "code" plein cadre (hook render_overlay) : compose dans
@@ -4946,7 +5640,7 @@ labels/frame_05000.txt
         self._overlay_refresh()
         if not self._dyn_crop:
             self._refresh_markers()
-        self._apply_roi_track(self.cur)   # ROI suit la boîte .ver, si un suivi est actif
+        self._apply_roi_track(self.cur)  # ROI suit la boîte .ver, si un suivi est actif
         if self._roi is not None:
             self.update_roi_panel()
         self.slider.blockSignals(True)
@@ -5008,8 +5702,11 @@ labels/frame_05000.txt
         # la fenêtre lo/hi de l'histogramme ne concerne que la vue sélectionnée.
         self._split_canvas.update_sat_render(
             self.lut_combo.currentData(),
-            self._cube_lut, self._cube_size,
-            self.hist.full_range, self._filter_flags())
+            self._cube_lut,
+            self._cube_size,
+            self.hist.full_range,
+            self._filter_flags(),
+        )
 
     def seek(self, idx):
         self.show_index(idx)
@@ -5029,7 +5726,8 @@ labels/frame_05000.txt
         fps = self.fps_spin.value() or 25.0
         total = (n - 1) if n > 0 else self.cur
         self.frame_label.setText(
-            f"/ {total}   |   {fmt_time(self.cur / fps)} / {fmt_time(total / fps)}")
+            f"/ {total}   |   {fmt_time(self.cur / fps)} / {fmt_time(total / fps)}"
+        )
         self.frame_spin.blockSignals(True)
         self.frame_spin.setMaximum(max(0, total))
         self.frame_spin.setValue(self.cur)
@@ -5093,9 +5791,11 @@ labels/frame_05000.txt
             return
         nxt = self.cur + 1
         n = self.source.count
-        _in_extract = (self._extract_start >= 0
-                       and self._extract_end > self._extract_start
-                       and self.loop_btn.isChecked())
+        _in_extract = (
+            self._extract_start >= 0
+            and self._extract_end > self._extract_start
+            and self.loop_btn.isChecked()
+        )
         if _in_extract and nxt > self._extract_end:
             nxt = self._extract_start
         elif self._link_views and not self._split_canvas.is_temporal():
@@ -5116,18 +5816,26 @@ labels/frame_05000.txt
                 self.stop()
                 return
         frame = self._prefetch_cache.pop(nxt, None)
-        if frame is None:
+        if frame is not None:
+            self._update_primary_info(nxt, frame, self._fetch_scale)
+        else:
             frame = self.source.get(nxt)
+            self._sync_count_widgets()
             if frame is None:
+                # vraie fin trouvee avant le total annonce : on boucle si demande
+                if self.loop_btn.isChecked() and nxt >= self.source.count > 0:
+                    self.show_index(0)
+                    return
                 self.stop()
                 return
+            self._update_primary_info(nxt, frame)
             frame = self._apply_fetch_scale(frame)
         self._raw = frame
         self._prefetch_schedule(nxt)
         self.cur = nxt
-        self._sync_temporal(nxt)        # mode temporel : vue gauche à i-N (avant rendu)
+        self._sync_temporal(nxt)  # mode temporel : vue gauche à i-N (avant rendu)
         self._display()
-        self._sync_view_frame(nxt)      # vues liées : même frame partout, AUSSI en lecture
+        self._sync_view_frame(nxt)  # vues liées : même frame partout, AUSSI en lecture
         # mesure fps reel (intervalle inter-frame)
         if self._last_tick_t > 0:
             dt = t0 - self._last_tick_t
@@ -5144,11 +5852,11 @@ labels/frame_05000.txt
                     self.fps_spin.setToolTip(
                         f"Max atteint : {self._fps_est:.1f} fps"
                         f" (cible {target:.1f} fps inaccessible)\n"
-                        "Cause probable : lecture reseau/SSH lente.")
+                        "Cause probable : lecture reseau/SSH lente."
+                    )
                 elif ratio < 0.9:
                     col = "#e0a020"
-                    self.fps_spin.setToolTip(
-                        f"FPS reel : {self._fps_est:.1f} / cible {target:.1f}")
+                    self.fps_spin.setToolTip(f"FPS reel : {self._fps_est:.1f} / cible {target:.1f}")
                 else:
                     col = "#50c060"
                     self.fps_spin.setToolTip("Cadence de lecture cible")
@@ -5191,9 +5899,16 @@ labels/frame_05000.txt
         try:
             idx = self.cur if frame_index is None else int(frame_index)
             raw = self._temporal_difference(frame, idx, rotate_reference=True)
-            return render_frame(raw, self.hist.lo, self.hist.hi,
-                                self.lut_combo.currentData(), cube, self._cube_size,
-                                self.hist.full_range, self._filter_flags())
+            return render_frame(
+                raw,
+                self.hist.lo,
+                self.hist.hi,
+                self.lut_combo.currentData(),
+                cube,
+                self._cube_size,
+                self.hist.full_range,
+                self._filter_flags(),
+            )
         except Exception:
             return frame
 
@@ -5218,11 +5933,11 @@ labels/frame_05000.txt
             frame_annots = self._visible_annots(idx)
             if frame_annots:
                 s = getattr(self, "_fetch_scale", 1.0) or 1.0
-                out = draw_annotation_boxes(out, frame_annots, orig_w, orig_h,
-                                            rotation=self._rotation, scale=s)
+                out = draw_annotation_boxes(
+                    out, frame_annots, orig_w, orig_h, rotation=self._rotation, scale=s
+                )
         graphs = []
-        if (self.overlay_chk.isChecked() and self.overlays
-                and self._layer_visible("sidecar", "sidecar")):
+        if self.overlay_chk.isChecked() and self.overlays and self._layer_visible("sidecar", "sidecar"):
             key = idx + self.sidecar_offset.value()
             graphs = list(self.overlays.get(key, []))
         if self.overlay_chk.isChecked():
@@ -5244,99 +5959,38 @@ labels/frame_05000.txt
             out = alpha_over(out, ov)
         return out
 
-    def on_cube_toggle(self):
-        if self.cube_btn.isChecked():
-            path, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self, self._tr("Charger un LUT .cube"), "", "LUT 3D (*.cube)")
-            if not path:
-                self.cube_btn.setChecked(False)
-                return
-            try:
-                self._cube_lut, self._cube_size = load_cube(path)
-            except Exception as ex:
-                self._cube_lut = None
-                self.cube_btn.setChecked(False)
-                self.cube_btn.setText(".cube")
-                QtWidgets.QMessageBox.warning(self, "LUT .cube invalide", str(ex))
-                return
-            self.cube_btn.setText(os.path.basename(path))
-            self.status.showMessage(f"LUT chargee: {os.path.basename(path)} (taille {self._cube_size})", 4000)
-        else:
-            self.cube_btn.setText(".cube")
-        self.refresh_frame()
-
-    # ----- conversion (tout type -> tout autre type, menu deroulant) -----
-    def _convert_targets(self):
-        """Cibles disponibles pour la source courante : liste de (mode, libelle).
-        On convertit un type vers les AUTRES types existants."""
-        src = self.source
-        specialized_ok = SpecializedWriter is not None
-        if isinstance(src, SpecializedSource):
-            return [("png8", "Dossier d'images PNG (8 bits, rendu)"),
-                    ("png16", "Dossier d'images PNG (16 bits, brut)"),
-                    ("mp4", "Video MP4")]
-        if isinstance(src, VideoSource):
-            t = []
-            src_ext = os.path.splitext(src.path)[1].lower()
-            if src_ext not in ('.mp4', '.m4v'):
-                t.append(("mp4", f"Vidéo MP4  (re-encodé depuis {src_ext[1:].upper()})"))
-            t.append(("png8", "Dossier d'images PNG"))
-            if specialized_ok:
-                t.append(("specialized", "Fichier SPECIALIZED (intensite)"))
-            return t
-        if isinstance(src, ImageSequenceSource):
-            # Detecte si la sequence est 16-bit
-            raw0 = src.get(0) if src.count > 0 else None
-            is16 = (raw0 is not None and
-                    to_intensity(raw0).dtype in (np.uint16, np.int16, np.float32))
-            t = [("mp4",
-                  "Video MP4  (rendu 3-sigma -> 8 bits)" if is16
-                  else "Video MP4")]
-            t.append(("png8", "Dossier PNG 8 bits  (rendu affiché)"))
-            if is16:
-                t.append(("png16", "Dossier PNG 16 bits  (donnees brutes)"))
-            if specialized_ok:
-                t.append(("specialized", "Fichier SPECIALIZED (intensite brute)"))
-            return t
-        return []
-
-    def _source_spec(self):
-        """(src_kind, src_arg) pour rouvrir la source dans le thread de conversion."""
-        src = self.source
-        if isinstance(src, SpecializedSource):
-            return ("specialized", src.path)
-        if isinstance(src, VideoSource):
-            return ("video", src.path)
-        if isinstance(src, ImageSequenceSource):
-            return ("images", list(src.paths))
-        return (None, None)
-
     # ----- composition multi-vues (assemble un MP4 de toute la disposition) -----
-    def _compose_grid_frame(self, idx):
-        """Compose une image unique reproduisant la disposition actuelle du
-        SplitCanvas (grille 2/3/4 vues ou fusion), à partir du rendu « tel
-        qu'affiché » (calques + contraste) de chaque vue, pour la frame `idx`."""
+    def _composition_plan(self):
+        """Disposition figee pour l'export : mode, etat fige de chaque case
+        (None si vide), parametres de fusion. L'utilisateur peut ensuite
+        changer de vues ou de fichiers sans changer le resultat."""
         sc = self._split_canvas
-
-        def frame_of(w):
-            if w is self._primary_frame:
-                return self._export_frame_as_viewed(idx) if self.source is not None else None
-            return w.render_as_viewed(idx) if w.has_source() else None
-
         mode = sc.mode()
-        if mode == "fusion":
-            if not sc._order:
-                return None
-            if len(sc._order) < 2:
-                return frame_of(sc._order[0])
-            f0, f1 = frame_of(sc._order[0]), frame_of(sc._order[1])
-            fus = sc._fusion
-            alpha = fus._alpha if fus is not None else 0.5
-            bmode = fus._mode if fus is not None else "alpha"
-            return blend_frames(f0, f1, alpha, bmode)
+        count = 2 if mode == "fusion" else sc.MODES[mode][2]
+        views = []
+        for w in sc._order[:count]:
+            if w is self._primary_frame:
+                views.append(ExportSnapshot.from_engine(self) if self.source is not None else None)
+            elif w.has_source():
+                views.append(ExportSnapshot.from_satellite(self, w))
+            else:
+                views.append(None)
+        fus = sc._fusion
+        return {
+            "mode": mode,
+            "views": views,
+            "alpha": fus._alpha if fus is not None else 0.5,
+            "blend": fus._mode if fus is not None else "alpha",
+        }
 
-        rows, cols, n = sc.MODES[mode]
-        tiles = [frame_of(w) for w in sc._order[:n]]
+    def _compose_plan_frame(self, plan, idx):
+        """Image unique reproduisant la disposition figee pour la frame idx."""
+        tiles = [v.viewed(idx) if v is not None else None for v in plan["views"]]
+        if plan["mode"] == "fusion":
+            if len(tiles) < 2:
+                return tiles[0] if tiles else None
+            return blend_frames(tiles[0], tiles[1], plan["alpha"], plan["blend"])
+        rows, cols, _n = self._split_canvas.MODES[plan["mode"]]
         if not any(t is not None for t in tiles):
             return None
         ref = next(t for t in tiles if t is not None)
@@ -5350,174 +6004,83 @@ labels/frame_05000.txt
             tt = t if t.ndim == 3 else cv2.cvtColor(t, cv2.COLOR_GRAY2BGR)
             if tt.shape[:2] != (th, tw):
                 tt = cv2.resize(tt, (tw, th), interpolation=cv2.INTER_AREA)
-            canvas[r * th:(r + 1) * th, c * tw:(c + 1) * tw] = tt
+            canvas[r * th : (r + 1) * th, c * tw : (c + 1) * tw] = tt
         return canvas
 
     def _convert_all_views(self):
         """Assemble un MP4 combinant toutes les vues visibles (disposition
         actuelle : 2/3/4 vues ou fusion), calques + contraste inclus, sur
-        toute la longueur de séquence de la vue principale. Reproduit le même
-        découpage que celui affiché dans le viewer (utile pour présentation)."""
+        toute la longueur de séquence de la vue principale. Tourne en tache
+        de fond : on peut continuer a utiliser l'appli pendant l'export."""
         if self._split_canvas.mode() == "1":
-            return   # bouton réutilisé (vue unique) : conversion normale via menu
+            return  # bouton masque en vue unique (chaque vue a son Convertir)
         if self.source is None:
             QtWidgets.QMessageBox.information(
-                self, "Convertir (toutes les vues)",
-                "Aucune source sur la vue principale.")
+                self, "Convertir (toutes les vues)", "Aucune source sur la vue principale."
+            )
             return
+        if self._compose_runner is not None and self._compose_runner.busy():
+            self.statusBar().showMessage("Une composition multi-vues est déjà en cours.", 4000)
+            return
+        default_fps = float(self.fps_spin.value() or getattr(self.source, "fps", 25.0) or 25.0)
+        options = Mp4OptionsDialog(self, default_fps)
+        if options.exec() != QtWidgets.QDialog.Accepted:
+            return
+        spec = options.panel.spec()
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, self._tr("Exporter la composition multi-vues..."),
-            "multiview.mp4", "Vidéo MP4 (*.mp4)")
+            self,
+            self._tr("Exporter la composition multi-vues..."),
+            "multiview.mp4",
+            "Vidéo MP4 (*.mp4)",
+        )
         if not path:
             return
         n = self.source.count
-        default_fps = float(self.fps_spin.value() or getattr(self.source, "fps", 25.0) or 25.0)
-        fps, ok = QtWidgets.QInputDialog.getDouble(
-            self, "Cadence de sortie", "Cadence MP4 (fps) :",
-            default_fps, 0.1, 480.0, 2)
-        if not ok:
-            return
-        dlg = QtWidgets.QProgressDialog(
-            "Assemblage des vues...", "Annuler", 0, max(1, n), self)
-        dlg.setWindowModality(Qt.WindowModal)
-        dlg.setMinimumDuration(0)
-        writer = None
-        written = 0
+        plan = self._composition_plan()
+        progress = QtWidgets.QProgressDialog(
+            self._tr("Assemblage des vues..."), self._tr("Annuler"), 0, max(1, n), self
+        )
+        progress.setWindowModality(Qt.NonModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        runner = JobRunner(self)
+        self._compose_runner = runner
+        progress.canceled.connect(runner.cancel)
+        runner.finished.connect(lambda _ok, _msg: progress.close())
+        # liberation des lecteurs ici et non dans le generateur : un export
+        # annule avant sa premiere frame n'execute jamais son ``finally``
+        runner.finished.connect(lambda _ok, _msg: self._close_plan(plan))
+        runner.start(self._job_compose(plan, path, spec, n, progress))
+        progress.show()
+
+    @staticmethod
+    def _close_plan(plan):
+        for view in plan["views"]:
+            if view is not None:
+                view.close()
+
+    def _job_compose(self, plan, path, spec, n, progress):
+        writer = Mp4Writer(path, spec)
         try:
             for idx in range(n):
-                frame = self._compose_grid_frame(idx)
+                frame = self._compose_plan_frame(plan, idx)
                 if frame is not None:
-                    if writer is None:
-                        h, w = frame.shape[:2]
-                        writer = cv2.VideoWriter(
-                            path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-                    writer.write(frame)
-                    written += 1
-                dlg.setValue(idx + 1)
-                QtWidgets.QApplication.processEvents()
-                if dlg.wasCanceled():
-                    break
+                    writer.write(idx, frame)
+                progress.setValue(idx + 1)
+                yield
+        except GeneratorExit:
+            writer.abort()
+            raise
         finally:
-            if writer is not None:
-                writer.release()
-            dlg.close()
+            writer.close()
+        written = writer.count
         if written:
             self.statusBar().showMessage(
-                f"Composition multi-vues exportée ({written} frames) → {path}", 6000)
+                f"Composition multi-vues exportée ({written} frames) → {path}", 8000
+            )
         else:
             self.statusBar().showMessage("Aucune frame composée (vues vides ?).", 4000)
-
-    def _rebuild_convert_menu(self):
-        self.convert_menu.clear()
-        targets = self._convert_targets()
-        name = self.source.name if self.source else "?"
-        # titre non cliquable rappelant la source convertie
-        head = self.convert_menu.addAction(f"Source : {name}")
-        head.setEnabled(False)
-        self.convert_menu.addSeparator()
-        for mode, label in targets:
-            act = self.convert_menu.addAction(label)
-            act.triggered.connect(lambda checked=False, m=mode: self._start_convert(m))
-        # En multivue, le bouton est piloté par _set_split ("Convertir toutes
-        # les vues", pas de menu) : ne pas écraser son texte/visibilité ici,
-        # sinon chaque changement de vue active (qui appelle _rebuild_convert_menu
-        # via _engine_import) le fait revenir au style vue-unique.
-        if self._split_canvas.mode() != "1":
-            return
-        # En vue unique, le bouton du bas reste caché : redondant avec le
-        # bouton « ⇄ Convertir » de la vue elle-même (bandeau, en haut).
-        self.convert_btn.setVisible(False)
-        short = (name[:18] + "…") if len(name) > 19 else name
-        set_ui_text(self.convert_btn, f"Convertir : {short}")
-        set_ui_tooltip(
-            self.convert_btn,
-            f"Convertit la vue sélectionnée « {name} » vers un autre format")
-
-    def _start_convert(self, mode):
-        if self.source is None:
-            return
-        dlg = ConvertDialog(self, self.source.directory, self.source.stem, mode)
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
-            return
-        out_path, mode, step, fps = dlg.values()
-        if not out_path:
-            return
-        src_kind, src_arg = self._source_spec()
-        if src_kind is None:
-            return
-        cube = None  # LUT .cube supprimee de l'UI
-        worker = ConvertWorker(src_kind, src_arg, out_path, mode,
-                               self.hist.lo, self.hist.hi, self.lut_combo.currentData(),
-                               cube, self._cube_size, step, self.hist.full_range,
-                               self._filter_flags(), fps,
-                               temporal_sub_k=(self._temp_sub_k
-                                               if self._temp_sub_on else 0))
-        labels = {"png8": "PNG 8 bits", "png16": "PNG 16 bits", "mp4": "MP4", "specialized": "SPECIALIZED"}
-        label = labels.get(mode, mode)
-        src_name = self.source.name
-        out_base = os.path.basename(out_path)
-        # Entrée dans le dock de log
-        conv_id = self._conv_id_seq
-        self._conv_id_seq += 1
-        log_text = f"[{label}]  {src_name}  →  {out_path}  |  En cours..."
-        log_item = QtWidgets.QListWidgetItem(log_text)
-        self.convlog_list.insertItem(0, log_item)
-        self._conv_workers[conv_id] = {"worker": worker, "item": log_item,
-                                        "src": src_name, "out": out_path, "mode": label}
-        if not (self.right_dock.isVisible()
-                and self.right_tab.currentIndex() == 1):
-            self._show_right_tab(1)
-        worker.progress.connect(
-            lambda c, t, cid=conv_id: self._conv_progress(cid, c, t))
-        worker.finished_ok.connect(
-            lambda d, k, cid=conv_id: self._convert_done(cid, d, k))
-        worker.failed.connect(
-            lambda m, cid=conv_id: self._convert_failed(cid, m))
-        worker.start()
-        self.status.showMessage(
-            f"Conversion [{label}] {src_name} → {out_path} démarrée", 5000)
-
-    def _conv_progress(self, conv_id, cur, total):
-        entry = self._conv_workers.get(conv_id)
-        if entry is None:
-            return
-        pct = int(100 * cur / total) if total > 0 else 0
-        bar = ("█" * (pct // 5)).ljust(20, "░")
-        entry["item"].setText(
-            f"[{entry['mode']}]  {entry['src']}  →  {entry['out']}\n"
-            f"  {bar}  {pct}%  ({cur}/{total})")
-
-    def _convert_done(self, conv_id, out_path, n):
-        entry = self._conv_workers.get(conv_id)
-        if entry:
-            entry["item"].setText(
-                f"✓  [{entry['mode']}]  {entry['src']}  →  {entry['out']}\n"
-                f"  Terminé : {n} frames écrites")
-        self.status.showMessage(
-            f"Conversion terminée : {n} frames → {out_path}", 8000)
-
-    def _convert_failed(self, conv_id, msg):
-        entry = self._conv_workers.get(conv_id)
-        if entry:
-            status = "Annulée" if "interrompue" in msg.lower() else f"Erreur: {msg}"
-            entry["item"].setText(
-                f"✗  [{entry['mode']}]  {entry['src']}  →  {entry['out']}\n"
-                f"  {status}")
-        self.status.showMessage(f"Conversion: {msg}", 8000)
-
-    def _convlog_clear_done(self):
-        """Retire du dock les entrées terminées/en erreur."""
-        running_ids = {cid for cid, e in self._conv_workers.items()
-                       if e["worker"].isRunning()}
-        to_remove = []
-        for cid, e in self._conv_workers.items():
-            if cid not in running_ids:
-                row = self.convlog_list.row(e["item"])
-                if row >= 0:
-                    self.convlog_list.takeItem(row)
-                to_remove.append(cid)
-        for cid in to_remove:
-            del self._conv_workers[cid]
 
     # ----- clics -----
     def _setup_clicks_file(self):
@@ -5536,9 +6099,13 @@ labels/frame_05000.txt
                         parts = line.replace(";", ",").split(",")
                         if len(parts) >= 3:
                             try:
-                                self.clicks.append((int(float(parts[0])),
-                                                    int(float(parts[1])),
-                                                    int(float(parts[2]))))
+                                self.clicks.append(
+                                    (
+                                        int(float(parts[0])),
+                                        int(float(parts[1])),
+                                        int(float(parts[2])),
+                                    )
+                                )
                             except ValueError:
                                 continue
             except Exception:
@@ -5547,7 +6114,9 @@ labels/frame_05000.txt
     def _rec_toggled(self, on):
         self.rec_btn.setText("REC clics  [ON]" if on else "REC clics")
         if on and self.clicks_path:
-            self.status.showMessage(f"Enregistrement actif. Clique l'image -> {self.clicks_path}", 4000)
+            self.status.showMessage(
+                f"Enregistrement actif. Clique l'image -> {self.clicks_path}", 4000
+            )
 
     def on_click(self, x, y):
         # forward aux plugins "overlay code" (hook on_view_click) : coords image
@@ -5560,8 +6129,7 @@ labels/frame_05000.txt
             if tid is not None:
                 self._roi_track_id = tid
                 self._apply_roi_track(self.cur)
-                self.statusBar().showMessage(
-                    f"Suivi ROI activé sur le track {tid}.", 3000)
+                self.statusBar().showMessage(f"Suivi ROI activé sur le track {tid}.", 3000)
             elif self._roi_track_id is not None:
                 self._roi_track_id = None
                 self.statusBar().showMessage("Suivi ROI annulé.", 2000)
@@ -5570,7 +6138,9 @@ labels/frame_05000.txt
         self.clicks.append((self.cur, x, y))
         self._append_click(self.cur, x, y)
         self._refresh_markers()
-        self.status.showMessage(f"Clic: frame={self.cur}, x={x}, y={y}  ->  {self.clicks_path}", 4000)
+        self.status.showMessage(
+            f"Clic: frame={self.cur}, x={x}, y={y}  ->  {self.clicks_path}", 4000
+        )
 
     def _append_click(self, fr, x, y):
         try:
@@ -5588,7 +6158,7 @@ labels/frame_05000.txt
         try:
             with open(self.clicks_path, "w", encoding="utf-8") as f:
                 f.write(f"# FrameViewer - clics pour {self.source.name}\nframe,x,y\n")
-                for (fr, x, y) in self.clicks:
+                for fr, x, y in self.clicks:
                     f.write(f"{fr},{x},{y}\n")
         except Exception as ex:
             QtWidgets.QMessageBox.warning(self, "Ecriture impossible", str(ex))
@@ -5604,8 +6174,10 @@ labels/frame_05000.txt
     def clear_clicks(self):
         if not self.clicks:
             return
-        if QtWidgets.QMessageBox.question(
-                self, "Effacer", "Effacer tous les clics enregistres ?") != QtWidgets.QMessageBox.Yes:
+        if (
+            QtWidgets.QMessageBox.question(self, "Effacer", "Effacer tous les clics enregistres ?")
+            != QtWidgets.QMessageBox.Yes
+        ):
             return
         self.clicks = []
         self._rewrite_file()
@@ -5616,7 +6188,8 @@ labels/frame_05000.txt
         if not self.clicks_path:
             return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, self._tr("Enregistrer les clics sous..."), self.clicks_path, "Texte (*.txt)")
+            self, self._tr("Enregistrer les clics sous..."), self.clicks_path, "Texte (*.txt)"
+        )
         if path:
             self.clicks_path = path
             self._rewrite_file()
@@ -5629,17 +6202,21 @@ labels/frame_05000.txt
     def closeEvent(self, e):
         self._save_dock_layout()
         self._stop_prefetch()
+        for thread in list(self._prefetch_retired):
+            thread.wait(2000)
         if self._annot_load_thread is not None:
             t = self._annot_load_thread
             t.stop()
             t.wait(2000)
             self._annot_load_thread = None
         self.stop()
-        for entry in self._conv_workers.values():
-            w = entry["worker"]
-            if w.isRunning():
-                w.stop()
-                w.wait(3000)
+        # exports en cours : les annuler ferme proprement les fichiers ecrits
+        for dlg in list(self._export_dialogs):
+            if dlg.is_busy():
+                dlg.cancel_export()
+        if self._compose_runner is not None and self._compose_runner.busy():
+            self._compose_runner.cancel()
+        self._close_temporal_reference_reader()
         if self.source:
             self.source.close()
         super().closeEvent(e)

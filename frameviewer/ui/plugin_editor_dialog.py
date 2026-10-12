@@ -6,6 +6,7 @@ disponibles depuis la classe de base, inseres par double-clic. Pas un
 editeur visuel par noeuds (hors de portee ici) -- un editeur de texte
 simple + une reference API navigable, pour rester dans l'app sans avoir a
 ouvrir un IDE externe."""
+
 import inspect
 import os
 import re
@@ -13,8 +14,12 @@ import re
 from PySide6 import QtWidgets
 
 from frameviewer.plugins.api import FrameViewerPlugin, PluginAPI
-from frameviewer.plugins.loader import (PLUGIN_FOLDER_PREFIX, PLUGIN_MODULE_FILE,
-                                         plugins_root, plugins_roots)
+from frameviewer.plugins.loader import (
+    PLUGIN_FOLDER_PREFIX,
+    PLUGIN_MODULE_FILE,
+    plugins_root,
+    plugins_roots,
+)
 from frameviewer.ui.i18n import set_ui_text, ui_text
 
 _NEW_PLUGIN_TEMPLATE = '''# -*- coding: utf-8 -*-
@@ -205,7 +210,8 @@ class PluginEditorDialog(QtWidgets.QDialog):
 
         right = QtWidgets.QVBoxLayout()
         ref_lbl = QtWidgets.QLabel(
-            "<b>Objets et actions disponibles</b><br>(double-clic pour insérer)")
+            "<b>Objets et actions disponibles</b><br>(double-clic pour insérer)"
+        )
         ref_lbl.setWordWrap(True)
         right.addWidget(ref_lbl)
         self._ref_tree = QtWidgets.QTreeWidget()
@@ -217,7 +223,8 @@ class PluginEditorDialog(QtWidgets.QDialog):
             "plugin peut définir (get_overlays, render_patch, ...).\n"
             "« Objets » (colonne du bas) : méthodes de l'app que TON code "
             "peut appeler via api.xxx(...) pour lire des données ou agir "
-            "sur l'interface.")
+            "sur l'interface."
+        )
         right.addWidget(self._ref_tree)
         top.addLayout(right)
 
@@ -273,9 +280,12 @@ class PluginEditorDialog(QtWidgets.QDialog):
                 continue
             for entry in sorted(os.listdir(root)):
                 folder = os.path.join(root, entry)
-                if (os.path.isdir(folder) and entry.startswith(PLUGIN_FOLDER_PREFIX)
-                        and os.path.isfile(os.path.join(folder, PLUGIN_MODULE_FILE))
-                        and entry not in self._entry_folders):
+                if (
+                    os.path.isdir(folder)
+                    and entry.startswith(PLUGIN_FOLDER_PREFIX)
+                    and os.path.isfile(os.path.join(folder, PLUGIN_MODULE_FILE))
+                    and entry not in self._entry_folders
+                ):
                     self._entry_folders[entry] = folder
                     self._plugin_list.addItem(entry)
         self._plugin_list.blockSignals(False)
@@ -325,25 +335,26 @@ class PluginEditorDialog(QtWidgets.QDialog):
 
     def _new_plugin(self):
         name, ok = QtWidgets.QInputDialog.getText(
-            self, "Nouveau plugin", "Nom du plugin (identifiant simple, ex. mon_plugin) :")
+            self, "Nouveau plugin", "Nom du plugin (identifiant simple, ex. mon_plugin) :"
+        )
         if not ok or not name.strip():
             return
         slug = re.sub(r"[^a-zA-Z0-9_]", "_", name.strip().lower())
         if not slug or not slug[0].isalpha():
             QtWidgets.QMessageBox.warning(
-                self, "Nouveau plugin", "Nom invalide (lettres/chiffres/underscore, "
-                "doit commencer par une lettre).")
+                self,
+                "Nouveau plugin",
+                "Nom invalide (lettres/chiffres/underscore, doit commencer par une lettre).",
+            )
             return
         folder = os.path.join(plugins_root(), f"{PLUGIN_FOLDER_PREFIX}{slug}")
         if os.path.exists(folder):
-            QtWidgets.QMessageBox.warning(
-                self, "Nouveau plugin", f"{folder} existe déjà.")
+            QtWidgets.QMessageBox.warning(self, "Nouveau plugin", f"{folder} existe déjà.")
             return
         create_code_plugin_folder(slug)
         self._refresh_plugin_list()
         self.select_entry(f"{PLUGIN_FOLDER_PREFIX}{slug}")
-        set_ui_text(
-            self._status, f"Créé -- {PLUGIN_FOLDER_PREFIX}{slug}/plugin.py")
+        set_ui_text(self._status, f"Créé -- {PLUGIN_FOLDER_PREFIX}{slug}/plugin.py")
 
     def select_entry(self, entry_name):
         """Selectionne le plugin `entry_name` (nom de dossier) dans la liste,

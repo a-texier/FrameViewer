@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """Panneau de selection (ROI) : mini-histogramme du crop + statistiques."""
+
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from frameviewer.ui.i18n import set_ui_pair, set_ui_text, ui_text
+from frameviewer.ui.theming import ui_color
+
 
 class MiniHist(QtWidgets.QWidget):
     """Petit histogramme (sans poignees) pour la zone selectionnee, avec
@@ -36,7 +39,7 @@ class MiniHist(QtWidgets.QWidget):
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor(24, 24, 28))
+        p.fillRect(self.rect(), ui_color(24, 24, 28))
         ml, mr, mb, mt = 28, 4, 13, 4
         w = max(1, self.width() - ml - mr)
         base = self.height() - mb
@@ -53,11 +56,13 @@ class MiniHist(QtWidgets.QWidget):
                 x1 = ml + (i + 1) / nb * w
                 p.drawRect(QtCore.QRectF(x0, base - bh, max(1.0, x1 - x0), bh))
         # axe Y (comptes) : ligne + graduations 0 / max
-        p.setPen(QtGui.QPen(QtGui.QColor(80, 80, 90), 1))
+        p.setPen(QtGui.QPen(ui_color(80, 80, 90), 1))
         p.drawLine(QtCore.QLineF(ml, mt, ml, base))
         p.drawLine(QtCore.QLineF(ml, base, ml + w, base))
-        font = p.font(); font.setPixelSize(8); p.setFont(font)
-        p.setPen(QtGui.QColor(150, 150, 160))
+        font = p.font()
+        font.setPixelSize(8)
+        p.setFont(font)
+        p.setPen(ui_color(150, 150, 160))
         p.drawText(QtCore.QRectF(0, mt - 2, ml - 3, 11), Qt.AlignRight, f"{mx:.0f}")
         p.drawText(QtCore.QRectF(0, base - 6, ml - 3, 11), Qt.AlignRight, "0")
         # axe X (niveau de gris) : bornes min/max du crop
@@ -67,7 +72,8 @@ class MiniHist(QtWidgets.QWidget):
 
 class RoiPanel(QtWidgets.QWidget):
     """Zoom du crop + mini histogramme + statistiques de la selection."""
-    convertRequested = QtCore.Signal()   # bouton "Convertir" (export ROI sur la séquence)
+
+    convertRequested = QtCore.Signal()  # bouton "Convertir" (export ROI sur la séquence)
 
     def _tr(self, text):
         return ui_text(self, text)
@@ -80,7 +86,8 @@ class RoiPanel(QtWidgets.QWidget):
         self.convert_btn.setToolTip(
             "Exporte cette ROI (fixe, ou suivant une boîte .ver si un suivi\n"
             "est actif) sur toute la séquence : MP4 / SPECIALIZED / dossier PNG,\n"
-            "avec option heatmap des histogrammes.")
+            "avec option heatmap des histogrammes."
+        )
         self.convert_btn.clicked.connect(self.convertRequested.emit)
 
         self.crop_label = QtWidgets.QLabel("(pas de selection)")
@@ -91,12 +98,11 @@ class RoiPanel(QtWidgets.QWidget):
         self.crop_label.setMinimumWidth(150)
         self.crop_label.setAlignment(Qt.AlignCenter)
         self.crop_label.setStyleSheet("background:#161618; border:1px solid #3a3a42; color:#888;")
-        self.crop_label.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding,
-            QtWidgets.QSizePolicy.Fixed)
+        self.crop_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         self.mini = MiniHist()
-        self.stats = QtWidgets.QLabel("Active l'outil 'Selection / ROI' puis\n"
-                                      "trace un rectangle sur l'image.")
+        self.stats = QtWidgets.QLabel(
+            "Active l'outil 'Selection / ROI' puis\ntrace un rectangle sur l'image."
+        )
         self.stats.setWordWrap(True)
         self.stats.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
@@ -121,8 +127,8 @@ class RoiPanel(QtWidgets.QWidget):
         self.mini.counts = None
         self.mini.update()
         set_ui_text(
-            self.stats,
-            "Active l'outil 'Selection / ROI' puis\ntrace un rectangle sur l'image.")
+            self.stats, "Active l'outil 'Selection / ROI' puis\ntrace un rectangle sur l'image."
+        )
 
     def _rescale_crop(self):
         if self._raw_pm is None:
@@ -159,13 +165,13 @@ class RoiPanel(QtWidgets.QWidget):
         g = np.asarray(inten_crop, dtype=np.float64).ravel()
         if g.size:
             french = (
-                f"{w} x {h} px   surface {w*h} px²\n"
+                f"{w} x {h} px   surface {w * h} px²\n"
                 f"min {g.min():.1f}    max {g.max():.1f}\n"
                 f"moyenne {g.mean():.2f}    σ {g.std():.2f}\n"
                 f"mediane {np.median(g):.1f}"
             )
             english = (
-                f"{w} x {h} px   area {w*h} px²\n"
+                f"{w} x {h} px   area {w * h} px²\n"
                 f"min {g.min():.1f}    max {g.max():.1f}\n"
                 f"mean {g.mean():.2f}    σ {g.std():.2f}\n"
                 f"median {np.median(g):.1f}"

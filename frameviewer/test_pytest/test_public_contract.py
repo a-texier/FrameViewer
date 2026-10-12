@@ -19,7 +19,11 @@ def test_required_demo_assets_are_complete_and_paired(data_dir):
     thermal = sorted((data_dir / "traffic_ir").glob("*.png"))
     labels = sorted((data_dir / "annotations_yolo").glob("frame_*.txt"))
     assert len(rgb) == len(thermal) == len(labels) == 10
-    assert [path.stem for path in rgb] == [path.stem for path in thermal] == [path.stem for path in labels]
+    assert (
+        [path.stem for path in rgb]
+        == [path.stem for path in thermal]
+        == [path.stem for path in labels]
+    )
     assert (data_dir / "ATTRIBUTION.md").is_file()
     assert bundled_data_test_dir().resolve() == data_dir.resolve()
 
@@ -36,9 +40,7 @@ def test_multiview_demo_csv_has_real_rows_for_every_frame(data_dir):
 
 
 def test_showcase_csv_counts_match_label_files(data_dir):
-    with (data_dir / "showcase_boxes.csv").open(
-        "r", encoding="utf-8-sig", newline=""
-    ) as stream:
+    with (data_dir / "showcase_boxes.csv").open("r", encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.DictReader(stream))
     by_frame = {}
     for row in rows:
@@ -46,13 +48,16 @@ def test_showcase_csv_counts_match_label_files(data_dir):
         by_frame[int(row["frame"])] += 1
     for index, label_path in enumerate(sorted((data_dir / "annotations_yolo").glob("frame_*.txt"))):
         expected = sum(
-            1 for line in label_path.read_text(encoding="utf-8").splitlines()
+            1
+            for line in label_path.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         )
         assert by_frame.get(index, 0) == expected
 
 
-def test_tutorial_staging_is_fresh_writable_and_does_not_modify_seed(isolated_user_config, data_dir):
+def test_tutorial_staging_is_fresh_writable_and_does_not_modify_seed(
+    isolated_user_config, data_dir
+):
     seed = data_dir / "traffic_rgb" / "frame_05000.png"
     original = seed.read_bytes()
     first = stage_tutorial_data()

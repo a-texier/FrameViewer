@@ -5,6 +5,7 @@ The live display and export paths share this implementation so their output
 remains identical. See ``MainWindow._display`` and
 ``_export_frame_as_viewed``.
 """
+
 import cv2
 import numpy as np
 
@@ -69,5 +70,5 @@ def composite_patches(bgr, patches, default_margin=8):
             x0, y0 = W - pw - m, m
         x0 = max(0, min(x0, W - pw))
         y0 = max(0, min(y0, H - ph))
-        out[y0:y0 + ph, x0:x0 + pw] = img
+        out[y0 : y0 + ph, x0 : x0 + pw] = img
     return out

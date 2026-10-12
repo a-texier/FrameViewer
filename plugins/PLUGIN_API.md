@@ -194,7 +194,7 @@ class MonPlugin(FrameViewerPlugin):
     name = "mon_plugin"
 
     def on_load(self, api):
-        self.csv_plots = None   # chemin injecte par le viewer (ou None)
+        self.csv_plots = None  # chemin injecte par le viewer (ou None)
         self._hover = None
 
     def overlay_elements(self, api):

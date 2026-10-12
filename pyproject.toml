@@ -1,0 +1,39 @@
+# Configuration des outils de dev (pas de packaging : l'appli se distribue
+# en exe PyInstaller, voir build_standalone.ps1). Version : frameviewer/__init__.py.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    ".venv_build",
+    ".github_publish",
+    "output_*",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# pyflakes (F), pycodestyle erreurs/avertissements (E, W), bugbear (B).
+# Le tri des imports (I) n'est pas active : certains modules dependent de
+# l'ordre (sys.path du conftest, imports optionnels).
+select = ["E", "F", "W", "B"]
+ignore = [
+    "E501",  # longueur : geree par ruff format, restent chaines/commentaires
+    "E731",  # petits lambdas nommes (traductions locales)
+    "E741",  # noms courts l/I herites dans le code de dessin
+    "B008",  # appels Qt en valeurs par defaut, voulus
+    "B905",  # zip() sans strict : longueurs differentes voulues par endroits
+]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest et scripts de test ajoutent la racine a sys.path avant d'importer
+"frameviewer/test_pytest/conftest.py" = ["E402"]
+"smoke_test.py" = ["E402"]
+"tutorial_multiview_test.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["frameviewer/test_pytest"]
+addopts = "-ra -p no:cacheprovider"

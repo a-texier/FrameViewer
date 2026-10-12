@@ -21,13 +21,14 @@ en pixels affiches dans render_overlay. Ainsi tout reste aligne quel que soit le
 zoom, et le survol/clic (donnes en coordonnees IMAGE) sont ramenes en fractions
 via api.image_size(), donc coherents avec le dessin.
 """
+
 import csv
 import os
 
 import cv2
 import numpy as np
 
-from frameviewer.plugins.api import FrameViewerPlugin   # ###REQUIS### (classe mere)
+from frameviewer.plugins.api import FrameViewerPlugin  # ###REQUIS### (classe mere)
 
 # couleurs BGRA (overlay) et BGR (patch/panel)
 _GREEN = (60, 220, 60)
@@ -38,10 +39,10 @@ _GREY = (90, 90, 90)
 _WHITE = (255, 255, 255)
 
 
-class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
-    name = "demo_showcase"                      # ###REQUIS### identifiant stable
+class DemoShowcasePlugin(FrameViewerPlugin):  # ###REQUIS### sous-classe
+    name = "demo_showcase"  # ###REQUIS### identifiant stable
     description = "Exemple qui montre tous les hooks (overlay, patch, panel, dock, drop, souris)."
-    corner = "tr"    # coin d'incrustation du render_patch : tl|tr|bl|br
+    corner = "tr"  # coin d'incrustation du render_patch : tl|tr|bl|br
     margin = 8
 
     # ###REQUIS (en pratique)### init de l'etat.
@@ -50,18 +51,18 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
         # chemin explicitement depose par l'utilisateur. La demo ne charge
         # jamais silencieusement un fichier par defaut.
         self.boxes = None
-        self._rows_cache = None     # {frame:int -> [dict, ...]}
-        self._cache_sig = None      # (chemin, mtime) du CSV deja lu
+        self._rows_cache = None  # {frame:int -> [dict, ...]}
+        self._cache_sig = None  # (chemin, mtime) du CSV deja lu
         # etat interactif
-        self._hover = None          # id de la boite survolee
-        self._selected = None       # id de la boite selectionnee au clic
-        self._glow = False          # touche 'g'
-        self._show_test = False     # touche 't'
-        self._alpha = 100           # opacite overlay 0..100 (touches +/-)
-        self._fill_alpha = 18       # remplissage des boites 0..100
+        self._hover = None  # id de la boite survolee
+        self._selected = None  # id de la boite selectionnee au clic
+        self._glow = False  # touche 'g'
+        self._show_test = False  # touche 't'
+        self._alpha = 100  # opacite overlay 0..100 (touches +/-)
+        self._fill_alpha = 18  # remplissage des boites 0..100
         self._box_thickness = 2
         self._grid_thickness = 2
-        self._boxes_px = []         # [(id, x1,y1,x2,y2)] en pixels affiches (hit-test)
+        self._boxes_px = []  # [(id, x1,y1,x2,y2)] en pixels affiches (hit-test)
         api.log("demo_showcase charge : depose le CSV dans l'entree boxes", level="ok")
 
     def on_unload(self, api):
@@ -99,32 +100,56 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
                 x1, y1 = int(r["xf"] * w), int(r["yf"] * h)
                 x2, y2 = int((r["xf"] + r["wf"]) * w), int((r["yf"] + r["hf"]) * h)
                 self._boxes_px.append((r["id"], x1, y1, x2, y2))
-                sel = (r["id"] == self._selected)
-                hov = (r["id"] == self._hover)
+                sel = r["id"] == self._selected
+                hov = r["id"] == self._hover
                 color = _YELLOW if sel else (_CYAN if hov else _GREEN)
                 thick = self._box_thickness + (1 if (sel or hov) else 0)
                 if self._fill_alpha > 0:
-                    cv2.rectangle(canvas, (x1, y1), (x2, y2),
-                                  (*color, round(255 * self._fill_alpha / 100)), -1)
+                    cv2.rectangle(
+                        canvas,
+                        (x1, y1),
+                        (x2, y2),
+                        (*color, round(255 * self._fill_alpha / 100)),
+                        -1,
+                    )
                 if self._glow and (sel or hov):
-                    cv2.rectangle(canvas, (x1 - 3, y1 - 3), (x2 + 3, y2 + 3),
-                                  (*color, 60), thick + 6)
+                    cv2.rectangle(
+                        canvas, (x1 - 3, y1 - 3), (x2 + 3, y2 + 3), (*color, 60), thick + 6
+                    )
                 cv2.rectangle(canvas, (x1, y1), (x2, y2), (*color, 255), thick)
                 if api.element_enabled("label"):
-                    cv2.putText(canvas, r["label"], (x1, max(12, y1 - 5)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (*_WHITE, 255), 1, cv2.LINE_AA)
+                    cv2.putText(
+                        canvas,
+                        r["label"],
+                        (x1, max(12, y1 - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (*_WHITE, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
                 drew = True
 
         if self._show_test:
-            cv2.putText(canvas, "TEST (touche t)", (10, h - 12),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (*_MAGENTA, 255), 2, cv2.LINE_AA)
+            cv2.putText(
+                canvas,
+                "TEST (touche t)",
+                (10, h - 12),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (*_MAGENTA, 255),
+                2,
+                cv2.LINE_AA,
+            )
             drew = True
 
         if not drew:
             return None
         # opacite globale pilotee par les touches +/- (voir on_view_key).
         if self._alpha < 100:
-            canvas[:, :, 3] = (canvas[:, :, 3].astype(np.uint16) * self._alpha // 100).astype(np.uint8)
+            canvas[:, :, 3] = (canvas[:, :, 3].astype(np.uint16) * self._alpha // 100).astype(
+                np.uint8
+            )
         return canvas
 
     # ---------------------------------------------------------------- vignette coin
@@ -136,10 +161,19 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
         patch = np.full((ph, pw, 3), 30, np.uint8)
         cv2.rectangle(patch, (0, 0), (pw - 1, ph - 1), _GREEN, 1)
         n = len(self._frame_rows(frame_idx))
-        cv2.putText(patch, f"frame {frame_idx}", (8, 24),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, _WHITE, 1, cv2.LINE_AA)
-        cv2.putText(patch, f"{n} boite(s)", (8, 48),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, _CYAN, 1, cv2.LINE_AA)
+        cv2.putText(
+            patch,
+            f"frame {frame_idx}",
+            (8, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            _WHITE,
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            patch, f"{n} boite(s)", (8, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.5, _CYAN, 1, cv2.LINE_AA
+        )
         return patch
 
     # ---------------------------------------------------------------- carte plugin
@@ -156,15 +190,24 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
             tw, th = max(1, int(fw * scale)), max(1, int(fh * scale))
             thumb = cv2.resize(frame, (tw, th), interpolation=cv2.INTER_AREA)
             ox, oy = (w - tw) // 2, 28 + (h - 28 - th) // 2
-            panel[oy:oy + th, ox:ox + tw] = thumb
+            panel[oy : oy + th, ox : ox + tw] = thumb
             for row in self._frame_rows(frame_idx):
-                x1 = ox + int(row["xf"] * tw); y1 = oy + int(row["yf"] * th)
+                x1 = ox + int(row["xf"] * tw)
+                y1 = oy + int(row["yf"] * th)
                 x2 = ox + int((row["xf"] + row["wf"]) * tw)
                 y2 = oy + int((row["yf"] + row["hf"]) * th)
                 cv2.rectangle(panel, (x1, y1), (x2, y2), _GREEN, 1)
         cv2.rectangle(panel, (0, 0), (w - 1, h - 1), _GREEN, 1)
-        cv2.putText(panel, f"frame {frame_idx} - {n} vehicle(s)", (8, 19),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, _WHITE, 1, cv2.LINE_AA)
+        cv2.putText(
+            panel,
+            f"frame {frame_idx} - {n} vehicle(s)",
+            (8, 19),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            _WHITE,
+            1,
+            cv2.LINE_AA,
+        )
         return panel
 
     # ---------------------------------------------------------------- dock Qt
@@ -172,37 +215,51 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
     # carte (build_panel est appele par l'UI, qui fait api.add_dock).
     def build_panel(self, api):
         from PySide6 import QtCore, QtWidgets
+
         box = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(box)
+
         def add_slider(label, lo, hi, value, setter, suffix=""):
             row = QtWidgets.QHBoxLayout()
             row.addWidget(QtWidgets.QLabel(label), 1)
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-            slider.setRange(lo, hi); slider.setValue(value)
+            slider.setRange(lo, hi)
+            slider.setValue(value)
             slider.setObjectName("showcase_" + label.lower().replace(" ", "_"))
             value_label = QtWidgets.QLabel(f"{value}{suffix}")
             value_label.setFixedWidth(42)
+
             def changed(v):
-                setter(int(v)); value_label.setText(f"{v}{suffix}")
+                setter(int(v))
+                value_label.setText(f"{v}{suffix}")
                 api.request_repaint()
+
             slider.valueChanged.connect(changed)
-            row.addWidget(slider, 2); row.addWidget(value_label)
+            row.addWidget(slider, 2)
+            row.addWidget(value_label)
             lay.addLayout(row)
             return slider
 
-        add_slider("Opacite", 0, 100, self._alpha,
-                   lambda v: setattr(self, "_alpha", v), " %")
-        add_slider("Remplissage", 0, 100, self._fill_alpha,
-                   lambda v: setattr(self, "_fill_alpha", v), " %")
-        add_slider("Trait boites", 1, 8, self._box_thickness,
-                   lambda v: setattr(self, "_box_thickness", v))
-        add_slider("Trait grille", 1, 8, self._grid_thickness,
-                   lambda v: setattr(self, "_grid_thickness", v))
+        add_slider("Opacite", 0, 100, self._alpha, lambda v: setattr(self, "_alpha", v), " %")
+        add_slider(
+            "Remplissage", 0, 100, self._fill_alpha, lambda v: setattr(self, "_fill_alpha", v), " %"
+        )
+        add_slider(
+            "Trait boites", 1, 8, self._box_thickness, lambda v: setattr(self, "_box_thickness", v)
+        )
+        add_slider(
+            "Trait grille",
+            1,
+            8,
+            self._grid_thickness,
+            lambda v: setattr(self, "_grid_thickness", v),
+        )
         btn = QtWidgets.QPushButton("Deselectionner")
 
         def on_reset():
             self._selected = None
             api.request_repaint()
+
         btn.clicked.connect(on_reset)
         lay.addWidget(btn)
         lay.addStretch(1)
@@ -216,6 +273,7 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
             self._cache_sig = None
             api.log("data rechargee", level="ok")
             api.request_repaint()
+
         return [("Recharger le CSV", reload_data)]
 
     # ---------------------------------------------------------------- overlays SIDECAR
@@ -227,13 +285,15 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
         if wimg <= 0 or himg <= 0:
             return []
         cx, cy = wimg // 2, himg // 2
-        return [{
-            "type": "croix",
-            "points": [(cx, cy)],
-            "color": (255, 0, 255),
-            "thickness": 2,
-            "text": {"label": "centre", "x": 8, "y": 8, "size": 14},
-        }]
+        return [
+            {
+                "type": "croix",
+                "points": [(cx, cy)],
+                "color": (255, 0, 255),
+                "thickness": 2,
+                "text": {"label": "centre", "x": 8, "y": 8, "size": 14},
+            }
+        ]
 
     # ---------------------------------------------------------------- drag & drop
     def accepts_drop(self, api, path):
@@ -276,7 +336,7 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
             self._alpha = max(0, self._alpha - 10)
             api.request_repaint()
             return True
-        return False    # touche non geree -> suit son chemin normal
+        return False  # touche non geree -> suit son chemin normal
 
     # ---------------------------------------------------------------- utilitaires
     def _csv_path(self):
@@ -300,8 +360,10 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
                     fr = int(float(row["frame"]))
                     rec = {
                         "id": int(float(row["id"])),
-                        "xf": float(row["xf"]), "yf": float(row["yf"]),
-                        "wf": float(row["wf"]), "hf": float(row["hf"]),
+                        "xf": float(row["xf"]),
+                        "yf": float(row["yf"]),
+                        "wf": float(row["wf"]),
+                        "hf": float(row["hf"]),
                         "label": row.get("label", ""),
                     }
                 except (KeyError, ValueError):
@@ -311,7 +373,7 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
         self._cache_sig = sig
 
     def _frame_rows(self, frame_idx):
-        self._load()   # no-op si deja en cache (compare chemin + mtime)
+        self._load()  # no-op si deja en cache (compare chemin + mtime)
         return (self._rows_cache or {}).get(int(frame_idx), [])
 
     def _draw_grid(self, canvas, w, h, step=80):
@@ -334,4 +396,4 @@ class DemoShowcasePlugin(FrameViewerPlugin):   # ###REQUIS### sous-classe
         return None
 
 
-PLUGIN = DemoShowcasePlugin   # ###REQUIS### expose la classe au loader
+PLUGIN = DemoShowcasePlugin  # ###REQUIS### expose la classe au loader

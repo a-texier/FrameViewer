@@ -1,4 +1,5 @@
 """Locate and stage the read-only tutorial assets in a writable workspace."""
+
 from __future__ import annotations
 
 import os

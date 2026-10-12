@@ -10,15 +10,16 @@ serialized as JSON, and has no Qt dependency.
 class NodeType:
     """Describe ports, editable parameters, and a pure evaluation function."""
 
-    def __init__(self, key, label, category, inputs, outputs, evaluate,
-                params=None, variadic_input=None):
+    def __init__(
+        self, key, label, category, inputs, outputs, evaluate, params=None, variadic_input=None
+    ):
         self.key = key
         self.label = label
         self.category = category
-        self.inputs = list(inputs)          # [(name, type_hint)]
-        self.outputs = list(outputs)        # [(name, type_hint)]
+        self.inputs = list(inputs)  # [(name, type_hint)]
+        self.outputs = list(outputs)  # [(name, type_hint)]
         self.evaluate = evaluate
-        self.params = list(params or [])    # [(name, type_hint, default)]
+        self.params = list(params or [])  # [(name, type_hint, default)]
         # Optional input port that accepts multiple incoming connections.
         self.variadic_input = variadic_input
 
@@ -60,184 +61,352 @@ def vue_to_index(v):
     return None
 
 
-register(NodeType(
-    "csv_column", "Colonne CSV", "Source",
-    inputs=[], outputs=[("valeur", "any")],
-    params=[("colonne", "column", ""), ("type", "choice:nombre,texte", "nombre")],
-    evaluate=lambda p, i, row: {
-        "valeur": _to_float(row.get(p.get("colonne"))) if p.get("type", "nombre") == "nombre"
-        else row.get(p.get("colonne"), "")},
-))
+register(
+    NodeType(
+        "csv_column",
+        "Colonne CSV",
+        "Source",
+        inputs=[],
+        outputs=[("valeur", "any")],
+        params=[("colonne", "column", ""), ("type", "choice:nombre,texte", "nombre")],
+        evaluate=lambda p, i, row: {
+            "valeur": _to_float(row.get(p.get("colonne")))
+            if p.get("type", "nombre") == "nombre"
+            else row.get(p.get("colonne"), "")
+        },
+    )
+)
 
-register(NodeType(
-    "constant", "Constante", "Source",
-    inputs=[], outputs=[("valeur", "any")],
-    params=[("valeur", "str", "0")],
-    evaluate=lambda p, i, row: {"valeur": p.get("valeur", "")},
-))
+register(
+    NodeType(
+        "constant",
+        "Constante",
+        "Source",
+        inputs=[],
+        outputs=[("valeur", "any")],
+        params=[("valeur", "str", "0")],
+        evaluate=lambda p, i, row: {"valeur": p.get("valeur", "")},
+    )
+)
 
-register(NodeType(
-    # The reserved ``__frame__`` value lets graphs react to the current frame
-    # without requiring a dedicated CSV column.
-    "frame_index", "Numero de frame", "Source",
-    inputs=[], outputs=[("valeur", "number")],
-    evaluate=lambda p, i, row: {"valeur": _to_float(row.get("__frame__"), 0.0)},
-))
+register(
+    NodeType(
+        # The reserved ``__frame__`` value lets graphs react to the current frame
+        # without requiring a dedicated CSV column.
+        "frame_index",
+        "Numero de frame",
+        "Source",
+        inputs=[],
+        outputs=[("valeur", "number")],
+        evaluate=lambda p, i, row: {"valeur": _to_float(row.get("__frame__"), 0.0)},
+    )
+)
 
-register(NodeType(
-    "compare", "Comparer", "Logique",
-    inputs=[("a", "any"), ("b", "any")], outputs=[("vrai", "bool")],
-    params=[("operateur", "choice:>,<,>=,<=,==", ">")],
-    evaluate=lambda p, i, row: {"vrai": {
-        ">": lambda a, b: _to_float(a) > _to_float(b),
-        "<": lambda a, b: _to_float(a) < _to_float(b),
-        ">=": lambda a, b: _to_float(a) >= _to_float(b),
-        "<=": lambda a, b: _to_float(a) <= _to_float(b),
-        "==": lambda a, b: _to_float(a) == _to_float(b),
-    }.get(p.get("operateur", ">"), lambda a, b: True)(i.get("a"), i.get("b"))},
-))
+register(
+    NodeType(
+        "compare",
+        "Comparer",
+        "Logique",
+        inputs=[("a", "any"), ("b", "any")],
+        outputs=[("vrai", "bool")],
+        params=[("operateur", "choice:>,<,>=,<=,==", ">")],
+        evaluate=lambda p, i, row: {
+            "vrai": {
+                ">": lambda a, b: _to_float(a) > _to_float(b),
+                "<": lambda a, b: _to_float(a) < _to_float(b),
+                ">=": lambda a, b: _to_float(a) >= _to_float(b),
+                "<=": lambda a, b: _to_float(a) <= _to_float(b),
+                "==": lambda a, b: _to_float(a) == _to_float(b),
+            }.get(p.get("operateur", ">"), lambda a, b: True)(i.get("a"), i.get("b"))
+        },
+    )
+)
 
-register(NodeType(
-    "midpoint", "Milieu", "Calcul",
-    inputs=[("a", "number"), ("b", "number")], outputs=[("milieu", "number")],
-    evaluate=lambda p, i, row: {"milieu": (_to_float(i.get("a")) + _to_float(i.get("b"))) / 2.0},
-))
+register(
+    NodeType(
+        "midpoint",
+        "Milieu",
+        "Calcul",
+        inputs=[("a", "number"), ("b", "number")],
+        outputs=[("milieu", "number")],
+        evaluate=lambda p, i, row: {
+            "milieu": (_to_float(i.get("a")) + _to_float(i.get("b"))) / 2.0
+        },
+    )
+)
 
-register(NodeType(
-    "math", "Operation (a op b)", "Calcul",
-    inputs=[("a", "number"), ("b", "number")], outputs=[("resultat", "number")],
-    params=[("operateur", "choice:+,-,*,/", "+")],
-    evaluate=lambda p, i, row: {"resultat": {
-        "+": lambda a, b: a + b,
-        "-": lambda a, b: a - b,
-        "*": lambda a, b: a * b,
-        "/": lambda a, b: a / b if b else 0.0,
-    }.get(p.get("operateur", "+"), lambda a, b: a)(
-        _to_float(i.get("a")), _to_float(i.get("b")))},
-))
+register(
+    NodeType(
+        "math",
+        "Operation (a op b)",
+        "Calcul",
+        inputs=[("a", "number"), ("b", "number")],
+        outputs=[("resultat", "number")],
+        params=[("operateur", "choice:+,-,*,/", "+")],
+        evaluate=lambda p, i, row: {
+            "resultat": {
+                "+": lambda a, b: a + b,
+                "-": lambda a, b: a - b,
+                "*": lambda a, b: a * b,
+                "/": lambda a, b: a / b if b else 0.0,
+            }.get(p.get("operateur", "+"), lambda a, b: a)(
+                _to_float(i.get("a")), _to_float(i.get("b"))
+            )
+        },
+    )
+)
 
-register(NodeType(
-    "color_rgb", "Couleur (R,G,B)", "Apparence",
-    inputs=[("r", "number"), ("g", "number"), ("b", "number")],
-    outputs=[("couleur", "color")],
-    evaluate=lambda p, i, row: {"couleur": (
-        int(_to_float(i.get("r"))), int(_to_float(i.get("g"))), int(_to_float(i.get("b"))))},
-))
+register(
+    NodeType(
+        "color_rgb",
+        "Couleur (R,G,B)",
+        "Apparence",
+        inputs=[("r", "number"), ("g", "number"), ("b", "number")],
+        outputs=[("couleur", "color")],
+        evaluate=lambda p, i, row: {
+            "couleur": (
+                int(_to_float(i.get("r"))),
+                int(_to_float(i.get("g"))),
+                int(_to_float(i.get("b"))),
+            )
+        },
+    )
+)
 
-register(NodeType(
-    "parse_color_csv", "Analyser couleur (\"R,G,B\")", "Apparence",
-    inputs=[("texte", "any")], outputs=[("couleur", "color")],
-    evaluate=lambda p, i, row: {"couleur": _parse_rgb(i.get("texte"))},
-))
+register(
+    NodeType(
+        "parse_color_csv",
+        'Analyser couleur ("R,G,B")',
+        "Apparence",
+        inputs=[("texte", "any")],
+        outputs=[("couleur", "color")],
+        evaluate=lambda p, i, row: {"couleur": _parse_rgb(i.get("texte"))},
+    )
+)
 
-register(NodeType(
-    "color_const", "Couleur fixe", "Apparence",
-    inputs=[], outputs=[("couleur", "color")],
-    params=[("rgb", "str", "255,190,0")],
-    evaluate=lambda p, i, row: {"couleur": _parse_rgb(p.get("rgb"))},
-))
+register(
+    NodeType(
+        "color_const",
+        "Couleur fixe",
+        "Apparence",
+        inputs=[],
+        outputs=[("couleur", "color")],
+        params=[("rgb", "str", "255,190,0")],
+        evaluate=lambda p, i, row: {"couleur": _parse_rgb(p.get("rgb"))},
+    )
+)
 
-register(NodeType(
-    "rect_shape", "Forme : Rectangle", "Forme",
-    inputs=[("x1", "number"), ("y1", "number"), ("x2", "number"), ("y2", "number"),
-           ("couleur", "color"), ("epaisseur", "number"), ("condition", "bool")],
-    outputs=[("forme", "shape")],
-    evaluate=lambda p, i, row: {"forme": None} if i.get("condition") is False else {"forme": {
-        "type": "ligne_brisee_fermee",
-        "points": [(_to_float(i.get("x1")), _to_float(i.get("y1"))),
-                  (_to_float(i.get("x2")), _to_float(i.get("y1"))),
-                  (_to_float(i.get("x2")), _to_float(i.get("y2"))),
-                  (_to_float(i.get("x1")), _to_float(i.get("y2")))],
-        "color": i.get("couleur") or (255, 190, 0),
-        "thickness": int(_to_float(i.get("epaisseur"), 2)) or 2,
-    }},
-))
+register(
+    NodeType(
+        "rect_shape",
+        "Forme : Rectangle",
+        "Forme",
+        inputs=[
+            ("x1", "number"),
+            ("y1", "number"),
+            ("x2", "number"),
+            ("y2", "number"),
+            ("couleur", "color"),
+            ("epaisseur", "number"),
+            ("condition", "bool"),
+        ],
+        outputs=[("forme", "shape")],
+        evaluate=lambda p, i, row: (
+            {"forme": None}
+            if i.get("condition") is False
+            else {
+                "forme": {
+                    "type": "ligne_brisee_fermee",
+                    "points": [
+                        (_to_float(i.get("x1")), _to_float(i.get("y1"))),
+                        (_to_float(i.get("x2")), _to_float(i.get("y1"))),
+                        (_to_float(i.get("x2")), _to_float(i.get("y2"))),
+                        (_to_float(i.get("x1")), _to_float(i.get("y2"))),
+                    ],
+                    "color": i.get("couleur") or (255, 190, 0),
+                    "thickness": int(_to_float(i.get("epaisseur"), 2)) or 2,
+                }
+            }
+        ),
+    )
+)
 
-register(NodeType(
-    "ellipse_shape", "Forme : Ellipse", "Forme",
-    inputs=[("cx", "number"), ("cy", "number"), ("rayon_x", "number"), ("rayon_y", "number"),
-           ("couleur", "color"), ("epaisseur", "number"), ("condition", "bool")],
-    outputs=[("forme", "shape")],
-    evaluate=lambda p, i, row: {"forme": None} if i.get("condition") is False else {"forme": {
-        "type": "ellipse",
-        "points": [(_to_float(i.get("cx")), _to_float(i.get("cy")))],
-        "a": _to_float(i.get("rayon_x"), 5) or 5,
-        "b": _to_float(i.get("rayon_y"), 5) or 5,
-        "color": i.get("couleur") or (255, 190, 0),
-        "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
-    }},
-))
+register(
+    NodeType(
+        "ellipse_shape",
+        "Forme : Ellipse",
+        "Forme",
+        inputs=[
+            ("cx", "number"),
+            ("cy", "number"),
+            ("rayon_x", "number"),
+            ("rayon_y", "number"),
+            ("couleur", "color"),
+            ("epaisseur", "number"),
+            ("condition", "bool"),
+        ],
+        outputs=[("forme", "shape")],
+        evaluate=lambda p, i, row: (
+            {"forme": None}
+            if i.get("condition") is False
+            else {
+                "forme": {
+                    "type": "ellipse",
+                    "points": [(_to_float(i.get("cx")), _to_float(i.get("cy")))],
+                    "a": _to_float(i.get("rayon_x"), 5) or 5,
+                    "b": _to_float(i.get("rayon_y"), 5) or 5,
+                    "color": i.get("couleur") or (255, 190, 0),
+                    "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
+                }
+            }
+        ),
+    )
+)
 
-register(NodeType(
-    "point_shape", "Forme : Point / Croix", "Forme",
-    inputs=[("x", "number"), ("y", "number"),
-           ("couleur", "color"), ("epaisseur", "number"), ("condition", "bool")],
-    outputs=[("forme", "shape")],
-    params=[("style", "choice:points,croix", "points")],
-    evaluate=lambda p, i, row: {"forme": None} if i.get("condition") is False else {"forme": {
-        "type": p.get("style", "points"),
-        "points": [(_to_float(i.get("x")), _to_float(i.get("y")))],
-        "color": i.get("couleur") or (255, 190, 0),
-        "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
-    }},
-))
+register(
+    NodeType(
+        "point_shape",
+        "Forme : Point / Croix",
+        "Forme",
+        inputs=[
+            ("x", "number"),
+            ("y", "number"),
+            ("couleur", "color"),
+            ("epaisseur", "number"),
+            ("condition", "bool"),
+        ],
+        outputs=[("forme", "shape")],
+        params=[("style", "choice:points,croix", "points")],
+        evaluate=lambda p, i, row: (
+            {"forme": None}
+            if i.get("condition") is False
+            else {
+                "forme": {
+                    "type": p.get("style", "points"),
+                    "points": [(_to_float(i.get("x")), _to_float(i.get("y")))],
+                    "color": i.get("couleur") or (255, 190, 0),
+                    "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
+                }
+            }
+        ),
+    )
+)
 
-register(NodeType(
-    # Segment connecting two points inside one view.
-    "line_shape", "Forme : Segment (2 points)", "Forme",
-    inputs=[("x1", "number"), ("y1", "number"), ("x2", "number"), ("y2", "number"),
-           ("couleur", "color"), ("epaisseur", "number"), ("condition", "bool")],
-    outputs=[("forme", "shape")],
-    evaluate=lambda p, i, row: {"forme": None} if i.get("condition") is False else {"forme": {
-        "type": "ligne_brisee",
-        "points": [(_to_float(i.get("x1")), _to_float(i.get("y1"))),
-                  (_to_float(i.get("x2")), _to_float(i.get("y2")))],
-        "color": i.get("couleur") or (255, 190, 0),
-        "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
-    }},
-))
+register(
+    NodeType(
+        # Segment connecting two points inside one view.
+        "line_shape",
+        "Forme : Segment (2 points)",
+        "Forme",
+        inputs=[
+            ("x1", "number"),
+            ("y1", "number"),
+            ("x2", "number"),
+            ("y2", "number"),
+            ("couleur", "color"),
+            ("epaisseur", "number"),
+            ("condition", "bool"),
+        ],
+        outputs=[("forme", "shape")],
+        evaluate=lambda p, i, row: (
+            {"forme": None}
+            if i.get("condition") is False
+            else {
+                "forme": {
+                    "type": "ligne_brisee",
+                    "points": [
+                        (_to_float(i.get("x1")), _to_float(i.get("y1"))),
+                        (_to_float(i.get("x2")), _to_float(i.get("y2"))),
+                    ],
+                    "color": i.get("couleur") or (255, 190, 0),
+                    "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
+                }
+            }
+        ),
+    )
+)
 
-register(NodeType(
-    # Cross-view segment rendered by the multi-view overlay layer. ``va`` and
-    # ``vb`` are zero-based view indices.
-    "interview_segment", "Segment inter-vues", "Inter-vues",
-    inputs=[("xa", "number"), ("ya", "number"), ("xb", "number"), ("yb", "number"),
-           ("couleur", "color"), ("epaisseur", "number"), ("condition", "bool")],
-    outputs=[("forme", "shape")],
-    params=[("vue_a", "choice:vue1,vue2,vue3,vue4", "vue1"),
-           ("vue_b", "choice:vue1,vue2,vue3,vue4", "vue2")],
-    evaluate=lambda p, i, row: {"forme": None} if i.get("condition") is False else {"forme": {
-        "type": "segment_inter_vues",
-        "va": vue_to_index(p.get("vue_a", "vue1")) or 0,
-        "pa": (_to_float(i.get("xa")), _to_float(i.get("ya"))),
-        "vb": vue_to_index(p.get("vue_b", "vue2")) or 0,
-        "pb": (_to_float(i.get("xb")), _to_float(i.get("yb"))),
-        "color": i.get("couleur") or (0, 255, 0),
-        "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
-    }},
-))
+register(
+    NodeType(
+        # Cross-view segment rendered by the multi-view overlay layer. ``va`` and
+        # ``vb`` are zero-based view indices.
+        "interview_segment",
+        "Segment inter-vues",
+        "Inter-vues",
+        inputs=[
+            ("xa", "number"),
+            ("ya", "number"),
+            ("xb", "number"),
+            ("yb", "number"),
+            ("couleur", "color"),
+            ("epaisseur", "number"),
+            ("condition", "bool"),
+        ],
+        outputs=[("forme", "shape")],
+        params=[
+            ("vue_a", "choice:vue1,vue2,vue3,vue4", "vue1"),
+            ("vue_b", "choice:vue1,vue2,vue3,vue4", "vue2"),
+        ],
+        evaluate=lambda p, i, row: (
+            {"forme": None}
+            if i.get("condition") is False
+            else {
+                "forme": {
+                    "type": "segment_inter_vues",
+                    "va": vue_to_index(p.get("vue_a", "vue1")) or 0,
+                    "pa": (_to_float(i.get("xa")), _to_float(i.get("ya"))),
+                    "vb": vue_to_index(p.get("vue_b", "vue2")) or 0,
+                    "pb": (_to_float(i.get("xb")), _to_float(i.get("yb"))),
+                    "color": i.get("couleur") or (0, 255, 0),
+                    "thickness": int(_to_float(i.get("epaisseur"), 1)) or 1,
+                }
+            }
+        ),
+    )
+)
 
-register(NodeType(
-    "text_label", "Texte (sur une forme)", "Forme",
-    inputs=[("forme", "shape"), ("texte", "any")],
-    outputs=[("forme", "shape")],
-    params=[("decalage_x", "number", "6"), ("decalage_y", "number", "-6"),
-           ("taille", "number", "12")],
-    evaluate=lambda p, i, row: {"forme": (
-        {**i["forme"], "text": {"label": str(i.get("texte", "")),
-                                "x": _to_float(p.get("decalage_x"), 6),
-                                "y": _to_float(p.get("decalage_y"), -6),
-                                "size": _to_float(p.get("taille"), 12)}}
-        if i.get("forme") else None)},
-))
+register(
+    NodeType(
+        "text_label",
+        "Texte (sur une forme)",
+        "Forme",
+        inputs=[("forme", "shape"), ("texte", "any")],
+        outputs=[("forme", "shape")],
+        params=[
+            ("decalage_x", "number", "6"),
+            ("decalage_y", "number", "-6"),
+            ("taille", "number", "12"),
+        ],
+        evaluate=lambda p, i, row: {
+            "forme": (
+                {
+                    **i["forme"],
+                    "text": {
+                        "label": str(i.get("texte", "")),
+                        "x": _to_float(p.get("decalage_x"), 6),
+                        "y": _to_float(p.get("decalage_y"), -6),
+                        "size": _to_float(p.get("taille"), 12),
+                    },
+                }
+                if i.get("forme")
+                else None
+            )
+        },
+    )
+)
 
-register(NodeType(
-    "output_overlays", "Sortie : Calques", "Sortie",
-    inputs=[("forme", "shape")], outputs=[],
-    params=[("vue", "choice:active,vue1,vue2,vue3,vue4", "active")],
-    evaluate=lambda p, i, row: {},
-    variadic_input="forme",
-))
+register(
+    NodeType(
+        "output_overlays",
+        "Sortie : Calques",
+        "Sortie",
+        inputs=[("forme", "shape")],
+        outputs=[],
+        params=[("vue", "choice:active,vue1,vue2,vue3,vue4", "active")],
+        evaluate=lambda p, i, row: {},
+        variadic_input="forme",
+    )
+)
 
 
 class Graph:
@@ -252,8 +421,12 @@ class Graph:
         self.frame_column = frame_column
 
     def to_dict(self):
-        return {"nodes": self.nodes, "edges": self.edges,
-                "csv_path": self.csv_path, "frame_column": self.frame_column}
+        return {
+            "nodes": self.nodes,
+            "edges": self.edges,
+            "csv_path": self.csv_path,
+            "frame_column": self.frame_column,
+        }
 
     @classmethod
     def from_dict(cls, d):
@@ -307,7 +480,7 @@ class Graph:
             for port_name, _t in nt.inputs:
                 srcs = incoming.get(port_name, [])
                 if nt.variadic_input == port_name:
-                    continue   # Collected separately below.
+                    continue  # Collected separately below.
                 if srcs:
                     src_id, src_port = srcs[0]
                     inputs[port_name] = results.get(src_id, {}).get(src_port)

@@ -1,11 +1,25 @@
 # -*- coding: utf-8 -*-
 """Shared media extensions, LUT palettes, and named colors."""
+
 import cv2
 
 SIGNED_DIFF_LUT = "coolwarm_r_black"
 
-VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".wmv", ".flv", ".webm",
-              ".mpg", ".mpeg", ".ts", ".m2ts", ".mts"}
+VIDEO_EXTS = {
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".m4v",
+    ".wmv",
+    ".flv",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+    ".ts",
+    ".m2ts",
+    ".mts",
+}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".jp2"}
 
 COLORMAPS = {
@@ -28,9 +42,18 @@ COLORMAPS = {
 
 # French color aliases accepted by legacy annotation files, in RGB 0..255.
 FRENCH_COLORS = {
-    "rouge": (230, 40, 40), "vert": (40, 220, 60), "bleu": (60, 120, 240),
-    "jaune": (240, 220, 40), "blanc": (240, 240, 240), "noir": (20, 20, 20),
-    "cyan": (40, 220, 220), "magenta": (230, 60, 200), "orange": (245, 150, 30),
-    "violet": (170, 80, 220), "rose": (245, 120, 170), "gris": (150, 150, 150),
-    "marron": (140, 80, 40), "turquoise": (40, 210, 180),
+    "rouge": (230, 40, 40),
+    "vert": (40, 220, 60),
+    "bleu": (60, 120, 240),
+    "jaune": (240, 220, 40),
+    "blanc": (240, 240, 240),
+    "noir": (20, 20, 20),
+    "cyan": (40, 220, 220),
+    "magenta": (230, 60, 200),
+    "orange": (245, 150, 30),
+    "violet": (170, 80, 220),
+    "rose": (245, 120, 170),
+    "gris": (150, 150, 150),
+    "marron": (140, 80, 40),
+    "turquoise": (40, 210, 180),
 }

@@ -4,10 +4,12 @@
 The application lives in the ``frameviewer`` package. See
 ``docs/architecture.md`` for the complete code map.
 """
+
 import sys
 
 from PySide6 import QtCore, QtWidgets
 
+from frameviewer import __version__
 from frameviewer.ui.main_window import MainWindow
 from frameviewer.ui.theme import DARK_QSS
 
@@ -15,10 +17,12 @@ from frameviewer.ui.theme import DARK_QSS
 def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("FrameViewer")
+    app.setApplicationVersion(__version__)
     app.setStyleSheet(DARK_QSS)
 
     def excepthook(t, v, tb):
         import traceback
+
         msg = "".join(traceback.format_exception(t, v, tb))
         try:
             QtWidgets.QMessageBox.critical(None, "Erreur FrameViewer", msg)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the complete public FrameViewer verification chain."""
+
 from __future__ import annotations
 
 import os
@@ -22,6 +23,9 @@ def run(*args: str) -> None:
 def main() -> None:
     run(sys.executable, "-m", "pytest", "frameviewer/test_pytest", "-ra")
     run(sys.executable, "tutorial_multiview_test.py")
+    # absent de l'arbre public (il exerce les formats optionnels)
+    if (ROOT / "smoke_test.py").is_file():
+        run(sys.executable, "smoke_test.py")
     checker = ROOT / "rebuild_standalone.py"
     if checker.is_file():
         run(sys.executable, str(checker), "--check")

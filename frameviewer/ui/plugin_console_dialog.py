@@ -9,20 +9,33 @@ donne de quoi debugger vite depuis l'app :
 Le journal vit sur le loader (self._mw._plugin_loader) ; un timer relit ses
 lignes pour l'affichage -- c'est le seul timer ici, sans rapport avec le
 rechargement des plugins."""
+
 import html
 import os
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from frameviewer.ui.theming import themed_html
 
 # couleur stable par plugin (le nom -> une teinte de la palette).
-_PALETTE = ["#5aafff", "#3ad07a", "#ffb454", "#c58aff", "#ff8aa0",
-            "#8ad0c0", "#e6c84f", "#7fb5ff", "#f6a1d0", "#9ad06a"]
+_PALETTE = [
+    "#5aafff",
+    "#3ad07a",
+    "#ffb454",
+    "#c58aff",
+    "#ff8aa0",
+    "#8ad0c0",
+    "#e6c84f",
+    "#7fb5ff",
+    "#f6a1d0",
+    "#9ad06a",
+]
 _LEVEL_COLOR = {"info": "#cdd6e0", "ok": "#3ad07a", "warn": "#ffb454", "error": "#ff6b6b"}
 _HELP_BUTTON_SS = (
     "QToolButton{min-width:28px;min-height:28px;border:1px solid #5aafff;"
     "border-radius:4px;background:#1769aa;color:white;font-weight:bold;}"
     "QToolButton:hover{background:#2185d0;border-color:#8ac7ff;}"
-    "QToolButton:pressed{background:#125789;}")
+    "QToolButton:pressed{background:#125789;}"
+)
 
 
 def _pid_color(pid):
@@ -30,7 +43,7 @@ def _pid_color(pid):
         return "#9aa4ad"
     h = 0
     for c in pid:
-        h = (h * 31 + ord(c)) & 0xffffffff
+        h = (h * 31 + ord(c)) & 0xFFFFFFFF
     return _PALETTE[h % len(_PALETTE)]
 
 
@@ -43,8 +56,10 @@ def _record_html(r):
     ts = f"<span style='color:#7c8794'>{r['ts']}</span>"
     tag = ""
     if r.get("pid"):
-        tag = (f" <span style='color:{_pid_color(r['pid'])};font-weight:bold'>"
-               f"[{html.escape(str(r['pid']))}]</span>")
+        tag = (
+            f" <span style='color:{_pid_color(r['pid'])};font-weight:bold'>"
+            f"[{html.escape(str(r['pid']))}]</span>"
+        )
     ln = ""
     if r.get("lineno"):
         loc = f"{html.escape(str(r['src']))}:{r['lineno']}" if r.get("src") else f"L{r['lineno']}"
@@ -54,7 +69,6 @@ def _record_html(r):
 
 
 class PluginConsoleDialog(QtWidgets.QDialog):
-
     def __init__(self, mw):
         super().__init__(mw)
         self._mw = mw
@@ -66,38 +80,49 @@ class PluginConsoleDialog(QtWidgets.QDialog):
         info = QtWidgets.QLabel(
             "Journal des plugins : api.log(), print(), erreurs et tests. Pour un "
             "vrai debug pas-a-pas (breakpoints), exporte la frame et lance le "
-            "runner sous VS Code (bouton ci-dessous).")
+            "runner sous VS Code (bouton ci-dessous)."
+        )
         info.setWordWrap(True)
         v.addWidget(info)
 
         self._view = QtWidgets.QTextEdit()
         self._view.setReadOnly(True)
-        self._view.setStyleSheet("QTextEdit{background:#141414;border:1px solid #333;"
-                                 "font-family:Consolas,monospace;font-size:12px;}")
+        self._view.setStyleSheet(
+            "QTextEdit{background:#141414;border:1px solid #333;"
+            "font-family:Consolas,monospace;font-size:12px;}"
+        )
         self._view.setLineWrapMode(QtWidgets.QTextEdit.NoWrap)
         v.addWidget(self._view, 1)
 
         row = QtWidgets.QHBoxLayout()
         b_test = QtWidgets.QPushButton("Tester sur la frame courante")
-        b_test.setToolTip("Execute les hooks de rendu du plugin selectionne sur "
-                          "la frame courante et affiche le resultat/erreurs.")
+        b_test.setToolTip(
+            "Execute les hooks de rendu du plugin selectionne sur "
+            "la frame courante et affiche le resultat/erreurs."
+        )
         b_test.clicked.connect(self._test)
         row.addWidget(b_test)
         b_env = QtWidgets.QPushButton("Diagnostic environnement")
-        b_env.setToolTip("Montre d'ou numpy/pandas/cv2 sont reellement charges "
-                         "(bundle vs env externe) et les site-packages actifs.")
+        b_env.setToolTip(
+            "Montre d'ou numpy/pandas/cv2 sont reellement charges "
+            "(bundle vs env externe) et les site-packages actifs."
+        )
         b_env.clicked.connect(self._env)
         row.addWidget(b_env)
         b_exp = QtWidgets.QPushButton("Exporter frame + commande VS Code")
-        b_exp.setToolTip("Ecrit la frame courante sur disque et donne la commande "
-                         "prete a coller pour debugger le plugin dans VS Code.")
+        b_exp.setToolTip(
+            "Ecrit la frame courante sur disque et donne la commande "
+            "prete a coller pour debugger le plugin dans VS Code."
+        )
         b_exp.clicked.connect(lambda: self._mw._export_current_frame_for_debug())
         row.addWidget(b_exp)
         b_help = QtWidgets.QToolButton()
         b_help.setText("?")
         b_help.setStyleSheet(_HELP_BUTTON_SS)
-        b_help.setToolTip("Comprendre les bibliothèques des plugins et les "
-                          "méthodes de debug dans FrameViewer ou VS Code.")
+        b_help.setToolTip(
+            "Comprendre les bibliothèques des plugins et les "
+            "méthodes de debug dans FrameViewer ou VS Code."
+        )
         b_help.clicked.connect(self._help)
         row.addWidget(b_help)
         row.addStretch(1)
@@ -138,7 +163,7 @@ class PluginConsoleDialog(QtWidgets.QDialog):
     def _refresh(self):
         recs = self._loader().log_records()
         n = len(recs)
-        if n < self._last:            # journal efface -> on repart de zero
+        if n < self._last:  # journal efface -> on repart de zero
             self._view.clear()
             self._last = 0
         if n == self._last:
@@ -146,8 +171,8 @@ class PluginConsoleDialog(QtWidgets.QDialog):
         cur = self._view.textCursor()
         cur.movePosition(QtGui.QTextCursor.End)
         self._view.setTextCursor(cur)
-        for r in recs[self._last:]:   # n'ajoute QUE les nouvelles lignes
-            self._view.insertHtml(_record_html(r) + "<br>")
+        for r in recs[self._last :]:  # n'ajoute QUE les nouvelles lignes
+            self._view.insertHtml(themed_html(_record_html(r) + "<br>"))
         self._last = n
         if self._auto.isChecked():
             sb = self._view.verticalScrollBar()
@@ -159,6 +184,7 @@ class PluginConsoleDialog(QtWidgets.QDialog):
 
     def _env(self):
         from frameviewer.plugins.loader import environment_report
+
         self._loader().log("=== Diagnostic environnement ===\n" + environment_report())
         self._refresh()
 
@@ -253,8 +279,10 @@ class PluginConsoleDialog(QtWidgets.QDialog):
         v = QtWidgets.QVBoxLayout(dlg)
         view = QtWidgets.QTextBrowser()
         view.setReadOnly(True)
-        view.setHtml(guide)
-        view.setStyleSheet("QTextBrowser{background:#14181d;border:1px solid #36414c;padding:10px;}")
+        view.setHtml(themed_html(guide))
+        view.setStyleSheet(
+            "QTextBrowser{background:#14181d;border:1px solid #36414c;padding:10px;}"
+        )
         v.addWidget(view, 1)
         r = QtWidgets.QHBoxLayout()
         b_copy = QtWidgets.QPushButton("Copier la commande")
